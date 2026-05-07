@@ -12,6 +12,7 @@ import SharePage from "./pages/SharePage";
 import AuthCallback from "./pages/AuthCallback";
 import Settings from "./pages/Settings";
 import Privacy from "./pages/Privacy";
+import StorePreview from "./pages/StorePreview";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -34,6 +35,7 @@ function Routed() {
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/capture/:id" element={<Protected><CaptureDetail /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
+      <Route path="/store-preview" element={<StorePreview />} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/share/:token" element={<SharePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

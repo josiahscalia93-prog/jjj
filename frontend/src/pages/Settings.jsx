@@ -54,6 +54,9 @@ export default function Settings() {
                 <a href={`${BACKEND}/api/extension/download`} className="nb-btn bg-white" data-testid="download-extension-btn">
                   <Download size={16}/> Download ZIP
                 </a>
+                <a href="/store-preview" className="nb-btn bg-white" data-testid="store-preview-link">
+                  <ExternalLink size={16}/> Preview Listing
+                </a>
                 <a href="https://chrome.google.com/webstore/devconsole" target="_blank" rel="noreferrer" className="nb-btn bg-white" data-testid="open-webstore-console">
                   <ExternalLink size={16}/> Web Store Dev Console
                 </a>

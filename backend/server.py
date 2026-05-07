@@ -37,6 +37,8 @@ JWT_SECRET = os.environ['JWT_SECRET']
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 APP_NAME = os.environ.get('APP_NAME', 'snapburst')
 STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET') or None
+PUBLIC_APP_URL = os.environ.get('PUBLIC_APP_URL', 'http://localhost:3000').rstrip('/')
 
 PRICING = {
     "pro":  {"name": "Pro",  "amount": 8.0,  "currency": "usd"},
@@ -556,22 +558,42 @@ async def billing_status(session_id: str, request: Request, user: dict = Depends
 async def stripe_webhook(request: Request):
     if not STRIPE_API_KEY:
         return {"ok": False}
-    host_url = str(request.base_url).rstrip("/")
-    sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
     body = await request.body()
     sig = request.headers.get("Stripe-Signature", "")
-    try:
-        ev = await sc.handle_webhook(body, sig)
-    except Exception as e:
-        logger.warning(f"webhook error: {e}")
-        return {"ok": False}
-    if ev and ev.session_id and ev.payment_status == "paid":
-        txn = await db.payment_transactions.find_one({"session_id": ev.session_id}, {"_id": 0})
+    # Prefer signed-webhook validation when STRIPE_WEBHOOK_SECRET is configured.
+    event_session_id = None
+    event_payment_status = None
+    event_metadata = {}
+    if STRIPE_WEBHOOK_SECRET:
+        try:
+            import stripe as stripe_sdk
+            event = stripe_sdk.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
+            obj = event["data"]["object"]
+            event_session_id = obj.get("id")
+            event_payment_status = obj.get("payment_status")
+            event_metadata = dict(obj.get("metadata") or {})
+        except Exception as e:
+            logger.warning(f"stripe webhook signature failed: {e}")
+            return Response(content="bad signature", status_code=400)
+    else:
+        # Fallback: emergentintegrations handler (proxy mode, no signature in test env)
+        host_url = str(request.base_url).rstrip("/")
+        sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
+        try:
+            ev = await sc.handle_webhook(body, sig)
+            event_session_id = getattr(ev, "session_id", None)
+            event_payment_status = getattr(ev, "payment_status", None)
+            event_metadata = getattr(ev, "metadata", None) or {}
+        except Exception as e:
+            logger.warning(f"webhook error: {e}")
+            return {"ok": False}
+    if event_session_id and event_payment_status == "paid":
+        txn = await db.payment_transactions.find_one({"session_id": event_session_id}, {"_id": 0})
         if txn and txn.get("payment_status") != "paid":
-            tier = txn.get("tier") or (ev.metadata or {}).get("tier")
+            tier = txn.get("tier") or event_metadata.get("tier")
             await db.users.update_one({"user_id": txn["user_id"]},
                 {"$set": {"plan": tier, "plan_updated_at": datetime.now(timezone.utc).isoformat()}})
-            await db.payment_transactions.update_one({"session_id": ev.session_id},
+            await db.payment_transactions.update_one({"session_id": event_session_id},
                 {"$set": {"payment_status": "paid", "paid_at": datetime.now(timezone.utc).isoformat()}})
     return {"ok": True}
 
@@ -649,7 +671,7 @@ async def post_to_slack(capture_id: str, body: PostNoteBody, user: dict = Depend
     hook = integ.get("slack_webhook_url")
     if not hook:
         raise HTTPException(400, "Slack not connected")
-    share_url = f"https://capture-annotate.preview.emergentagent.com/share/{cap['share_token']}"
+    share_url = f"{PUBLIC_APP_URL}/share/{cap['share_token']}"
     text = body.note or f"📷 *{cap['title']}* — shared via SnapBurst\n{share_url}"
     try:
         r = requests.post(hook, json={"text": text}, timeout=15)
@@ -666,7 +688,7 @@ async def post_to_jira(capture_id: str, body: PostNoteBody, user: dict = Depends
     integ = await db.user_integrations.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
     if not (integ.get("jira_api_token") and integ.get("jira_base_url") and integ.get("jira_project_key")):
         raise HTTPException(400, "Jira not connected")
-    share_url = f"https://capture-annotate.preview.emergentagent.com/share/{cap['share_token']}"
+    share_url = f"{PUBLIC_APP_URL}/share/{cap['share_token']}"
     summary = body.note or f"SnapBurst: {cap['title']}"
     payload = {
         "fields": {
@@ -703,12 +725,16 @@ async def post_to_jira(capture_id: str, body: PostNoteBody, user: dict = Depends
 def build_extension_zip() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(EXTENSION_DIR):
+        for root, dirs, files in os.walk(EXTENSION_DIR):
+            # Don't bundle listing screenshots into the extension itself
+            dirs[:] = [d for d in dirs if d != "store-assets"]
             for f in files:
                 if f in {".DS_Store"} or f.endswith((".md",)):
                     continue
                 full = Path(root) / f
                 arc = full.relative_to(EXTENSION_DIR).as_posix()
+                if arc.startswith("store-assets/"):
+                    continue
                 zf.write(full, arc)
     return buf.getvalue()
 
@@ -731,6 +757,100 @@ async def extension_info():
         "size_bytes": len(data),
         "files": sorted([str(p.relative_to(EXTENSION_DIR)) for p in EXTENSION_DIR.rglob("*") if p.is_file()]),
     }
+
+# ---------- Web Store listing assets ----------
+LISTING_DIR = EXTENSION_DIR / "store-assets"
+
+@api_router.get("/extension/listing-assets")
+async def listing_assets():
+    if not LISTING_DIR.exists():
+        return {"items": []}
+    items = []
+    for p in sorted(LISTING_DIR.glob("*.png")):
+        items.append({
+            "name": p.name,
+            "url": f"/api/extension/listing-asset/{p.name}",
+            "size_bytes": p.stat().st_size,
+        })
+    return {"items": items}
+
+@api_router.get("/extension/listing-asset/{filename}")
+async def listing_asset(filename: str):
+    if "/" in filename or ".." in filename:
+        raise HTTPException(400, "Invalid filename")
+    p = LISTING_DIR / filename
+    if not p.exists():
+        raise HTTPException(404, "Not found")
+    return Response(
+        content=p.read_bytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=600"},
+    )
+
+# ---------- GIF transcoding ----------
+import shutil
+import subprocess
+
+@api_router.post("/captures/{capture_id}/to-gif")
+async def transcode_to_gif(capture_id: str, user: dict = Depends(current_user)):
+    if not shutil.which("ffmpeg"):
+        raise HTTPException(500, "ffmpeg not available")
+    cap = await db.captures.find_one(
+        {"id": capture_id, "user_id": user["user_id"], "is_deleted": False},
+        {"_id": 0},
+    )
+    if not cap or cap["kind"] != "recording":
+        raise HTTPException(404, "Recording not found")
+    src_bytes, _ = get_object(cap["storage_path"])
+    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as src_f:
+        src_f.write(src_bytes)
+        src = src_f.name
+    dst = src.replace(".webm", ".gif")
+    palette = src.replace(".webm", "_palette.png")
+    try:
+        # 2-pass palette for high-quality, small-size GIF
+        await asyncio.to_thread(subprocess.run, [
+            "ffmpeg", "-y", "-i", src, "-vf",
+            "fps=12,scale=720:-1:flags=lanczos,palettegen", palette,
+        ], check=True, capture_output=True, timeout=60)
+        await asyncio.to_thread(subprocess.run, [
+            "ffmpeg", "-y", "-i", src, "-i", palette,
+            "-lavfi", "fps=12,scale=720:-1:flags=lanczos [x]; [x][1:v] paletteuse",
+            dst,
+        ], check=True, capture_output=True, timeout=120)
+        gif_bytes = open(dst, "rb").read()
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, f"ffmpeg failed: {e.stderr[:300] if e.stderr else 'unknown'}")
+    finally:
+        for p in (src, dst, palette):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+    new_id = str(uuid.uuid4())
+    new_path = f"{APP_NAME}/captures/{user['user_id']}/{new_id}.gif"
+    result = put_object(new_path, gif_bytes, "image/gif")
+    share_token = uuid.uuid4().hex
+    doc = {
+        "id": new_id,
+        "user_id": user["user_id"],
+        "title": f"{cap['title']} — GIF",
+        "kind": "screenshot",  # treat as image-like for browser playback
+        "content_type": "image/gif",
+        "size": result["size"],
+        "storage_path": result["path"],
+        "share_token": share_token,
+        "duration_sec": cap.get("duration_sec"),
+        "annotations": [],
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_recording_id": capture_id,
+    }
+    await db.captures.insert_one(doc)
+    doc.pop("_id", None)
+    doc.pop("is_deleted", None)
+    doc.pop("source_recording_id", None)
+    return doc
 
 
 @api_router.get("/")

@@ -4,7 +4,7 @@ import Navbar from "../components/Navbar";
 import AIChat from "../components/AIChat";
 import AnnotationEditor from "../components/AnnotationEditor";
 import { api } from "../lib/api";
-import { ArrowLeft, Share2, Copy, Slack, Mail, ExternalLink } from "lucide-react";
+import { ArrowLeft, Share2, Copy, Slack, Mail, ExternalLink, FileImage } from "lucide-react";
 import { toast } from "sonner";
 
 export default function CaptureDetail() {
@@ -14,6 +14,7 @@ export default function CaptureDetail() {
   const [videoUrl, setVideoUrl] = useState(null);
   const [integ, setInteg] = useState({ slack_connected: false, jira_connected: false });
   const [posting, setPosting] = useState(false);
+  const [convertingGif, setConvertingGif] = useState(false);
 
   const refresh = async () => {
     try { const { data } = await api.get(`/captures/${id}`); setCap(data); }
@@ -67,6 +68,15 @@ export default function CaptureDetail() {
   const trelloIntent = () => {
     window.open(`https://trello.com/add-card?desc=${encodeURIComponent(shareUrl)}&name=${encodeURIComponent(cap.title)}`, "_blank");
   };
+  const convertToGif = async () => {
+    setConvertingGif(true);
+    try {
+      const { data } = await api.post(`/captures/${cap.id}/to-gif`);
+      toast.success("GIF created", { action: { label: "Open", onClick: () => nav(`/capture/${data.id}`) } });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "GIF conversion failed");
+    } finally { setConvertingGif(false); }
+  };
 
   return (
     <div className="min-h-screen bg-[#FAFAFA]">
@@ -85,9 +95,16 @@ export default function CaptureDetail() {
           </div>
 
           {cap.kind === "recording" ? (
-            <div className="nb bg-black p-2">
-              <video src={videoUrl} controls className="w-full max-h-[70vh]" data-testid="recording-player" />
-            </div>
+            <>
+              <div className="nb bg-black p-2">
+                <video src={videoUrl} controls className="w-full max-h-[70vh]" data-testid="recording-player" />
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button onClick={convertToGif} disabled={convertingGif} className="nb-btn nb-btn-mint !py-2 !px-3 text-sm" data-testid="convert-gif-btn">
+                  <FileImage size={14}/> {convertingGif ? "Transcoding…" : "Convert to GIF"}
+                </button>
+              </div>
+            </>
           ) : (
             <AnnotationEditor capture={cap} refresh={refresh} />
           )}
