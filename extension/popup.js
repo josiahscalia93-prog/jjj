@@ -37,7 +37,6 @@ async function uploadBlob(blob, kind, title, ext, durationSec) {
   const cap = await r.json();
   status("Uploaded ✓");
   await pushRecent(cap);
-  // open share page
   chrome.tabs.create({ url: `${APP_BASE}/capture/${cap.id}` });
 }
 
@@ -60,6 +59,12 @@ async function renderRecent() {
 }
 function escapeHtml(s){return (s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 
+async function currentTab() {
+  const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return t;
+}
+function getQuality() { return document.querySelector('input[name="q"]:checked')?.value || "1080"; }
+
 // --- visible area screenshot ---
 $("cap-visible").addEventListener("click", async () => {
   status("Capturing…");
@@ -68,6 +73,55 @@ $("cap-visible").addEventListener("click", async () => {
     const blob = await (await fetch(dataUrl)).blob();
     const tab = await currentTab();
     await uploadBlob(blob, "screenshot", tab?.title || "Visible area", "png");
+  } catch (e) { status("Capture failed"); console.error(e); }
+});
+
+// --- selected area screenshot ---
+$("cap-area").addEventListener("click", async () => {
+  status("Drag to select area…");
+  try {
+    const tab = await currentTab();
+    // 1) inject overlay and let user drag a rect
+    const [{ result: rect }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => new Promise((resolve) => {
+        const ov = document.createElement("div");
+        ov.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,0.25);cursor:crosshair";
+        const sel = document.createElement("div");
+        sel.style.cssText = "position:absolute;border:2px dashed #FB923C;background:rgba(253,224,71,0.2);";
+        ov.appendChild(sel);
+        const tip = document.createElement("div");
+        tip.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#FDE047;color:#000;padding:6px 12px;border:2px solid #000;border-radius:8px;font-family:system-ui;font-weight:700";
+        tip.textContent = "Drag to select area · Esc to cancel";
+        ov.appendChild(tip);
+        document.documentElement.appendChild(ov);
+        let sx = 0, sy = 0, dragging = false;
+        const onDown = (e) => { dragging = true; sx = e.clientX; sy = e.clientY; sel.style.left=sx+"px"; sel.style.top=sy+"px"; sel.style.width="0"; sel.style.height="0"; };
+        const onMove = (e) => { if (!dragging) return; const x = Math.min(e.clientX, sx), y = Math.min(e.clientY, sy); sel.style.left=x+"px"; sel.style.top=y+"px"; sel.style.width=Math.abs(e.clientX-sx)+"px"; sel.style.height=Math.abs(e.clientY-sy)+"px"; };
+        const onUp = (e) => {
+          if (!dragging) return;
+          const x = Math.min(e.clientX, sx), y = Math.min(e.clientY, sy);
+          const w = Math.abs(e.clientX-sx), h = Math.abs(e.clientY-sy);
+          cleanup(); resolve({ x, y, w, h, dpr: window.devicePixelRatio || 1 });
+        };
+        const onKey = (e) => { if (e.key === "Escape") { cleanup(); resolve(null); } };
+        const cleanup = () => { ov.remove(); document.removeEventListener("keydown", onKey, true); };
+        ov.addEventListener("mousedown", onDown);
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp, { once: true });
+        document.addEventListener("keydown", onKey, true);
+      }),
+    });
+    if (!rect || rect.w < 4 || rect.h < 4) { status("Cancelled"); return; }
+    // 2) full visible capture, then crop client-side in popup
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "png" });
+    const img = await (async () => { const b = await (await fetch(dataUrl)).blob(); return await createImageBitmap(b); })();
+    const dpr = rect.dpr;
+    const canvas = new OffscreenCanvas(Math.round(rect.w * dpr), Math.round(rect.h * dpr));
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, rect.x * dpr, rect.y * dpr, rect.w * dpr, rect.h * dpr, 0, 0, canvas.width, canvas.height);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    await uploadBlob(blob, "screenshot", (tab?.title || "Selected area") + " — area", "png");
   } catch (e) { status("Capture failed"); console.error(e); }
 });
 
@@ -81,13 +135,7 @@ $("cap-full").addEventListener("click", async () => {
   } catch (e) { status("Capture failed"); console.error(e); }
 });
 
-async function currentTab() {
-  const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return t;
-}
-
 async function fullPageCapture(tabId) {
-  // get scroll metrics
   const [{ result: dims }] = await chrome.scripting.executeScript({
     target: { tabId }, func: () => ({
       total: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
@@ -104,7 +152,6 @@ async function fullPageCapture(tabId) {
     y += dims.view;
   }
   await chrome.scripting.executeScript({ target: { tabId }, func: () => window.scrollTo(0, 0) });
-  // stitch
   const imgs = await Promise.all(slices.map(s => loadImg(s.url)));
   const w = imgs[0].width;
   const totalPx = Math.ceil(dims.total * dims.dpr);
@@ -122,12 +169,10 @@ function loadImg(url) { return new Promise(async (res) => {
   const bm = await createImageBitmap(blob); res(bm);
 });}
 
-// --- screen recording (delegated to offscreen via tab) ---
+// --- screen recording (delegated to recorder page) ---
 $("rec-screen").addEventListener("click", () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL("recorder.html?mode=screen") });
-});
-$("rec-cam").addEventListener("click", () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL("recorder.html?mode=cam") });
+  const q = getQuality();
+  chrome.tabs.create({ url: chrome.runtime.getURL(`recorder.html?mode=screen&q=${q}`) });
 });
 
 // --- dashboard / open app ---
@@ -135,7 +180,6 @@ $("open-dashboard").addEventListener("click", () => chrome.tabs.create({ url: AP
 $("open-app").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: APP_BASE }); });
 $("connect").addEventListener("click", () => chrome.tabs.create({ url: APP_BASE + "/login?from=extension" }));
 
-// listen for token push from web app
 chrome.runtime.onMessageExternal?.addListener?.((msg, sender, send) => {
   if (msg?.type === "snapburst-token" && msg.token) { setToken(msg.token); send({ ok: true }); }
 });

@@ -3,7 +3,7 @@
   "name": "SnapBurst — Screen Capture, Record & Share",
   "short_name": "SnapBurst",
   "version": "1.0.0",
-  "description": "Capture screenshots, record screen + webcam + mic, annotate, and share instantly with shareable links. Works with Slack, Trello, Jira & Gmail.",
+  "description": "Screenshot, full-page capture, and HD screen + webcam + mic recording. Annotate and share via Slack, Trello, Jira & Gmail.",
   "permissions": [
     "activeTab",
     "tabs",

@@ -25,21 +25,31 @@
       <div class="tile-tt">Visible Area</div>
       <div class="tile-st">Quick screenshot</div>
     </button>
-    <button class="tile pink" id="cap-full">
+    <button class="tile pink" id="cap-area">
+      <div class="tile-icn">⬚</div>
+      <div class="tile-tt">Selected Area</div>
+      <div class="tile-st">Drag to crop</div>
+    </button>
+    <button class="tile mint" id="cap-full">
       <div class="tile-icn">▤</div>
       <div class="tile-tt">Full Page</div>
       <div class="tile-st">Scrolling capture</div>
     </button>
-    <button class="tile mint" id="rec-screen">
+    <button class="tile blue" id="rec-screen">
       <div class="tile-icn">●</div>
       <div class="tile-tt">Record Screen</div>
       <div class="tile-st">Tab / window / desktop</div>
     </button>
-    <button class="tile blue" id="rec-cam">
-      <div class="tile-icn">◉</div>
-      <div class="tile-tt">Webcam + Mic</div>
-      <div class="tile-st">Talking head</div>
-    </button>
+  </section>
+
+  <section class="quality">
+    <label class="qlabel">Recording quality</label>
+    <div class="qopts">
+      <label><input type="radio" name="q" value="1080" checked /> 1080p</label>
+      <label><input type="radio" name="q" value="1440" /> 2K</label>
+      <label><input type="radio" name="q" value="2160" /> 4K</label>
+      <label><input type="radio" name="q" value="gif" /> GIF</label>
+    </div>
   </section>
 
   <section class="recent">
