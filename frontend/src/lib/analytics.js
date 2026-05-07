@@ -1,10 +1,12 @@
 // Lightweight analytics for SnapBurst CTAs / install funnel.
-// Uses navigator.sendBeacon for fire-and-forget POSTs.
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 
 const HERO_VARIANTS = ["A", "B"];
 const VARIANT_KEY = "sb_hero_variant";
 const VID_KEY = "sb_visitor_id";
+const STORE_ID_KEY = "sb_store_id";
+const STORE_ID_FETCHED_KEY = "sb_store_id_at";
+const STORE_ID_TTL_MS = 5 * 60 * 1000;
 
 export function getVisitorId() {
   let id = localStorage.getItem(VID_KEY);
@@ -22,6 +24,28 @@ export function getHeroVariant() {
     localStorage.setItem(VARIANT_KEY, v);
   }
   return v;
+}
+
+export function setHeroVariant(v) {
+  if (!HERO_VARIANTS.includes(v)) return;
+  localStorage.setItem(VARIANT_KEY, v);
+}
+
+// Cached fetch of the published Chrome Web Store extension id.
+async function getStoreExtensionId() {
+  const cached = localStorage.getItem(STORE_ID_KEY);
+  const at = parseInt(localStorage.getItem(STORE_ID_FETCHED_KEY) || "0", 10);
+  if (cached && Date.now() - at < STORE_ID_TTL_MS) return cached || null;
+  try {
+    const r = await fetch(`${BACKEND}/api/extension/store-id`);
+    const d = await r.json();
+    const eid = (d.extension_id || "").trim();
+    localStorage.setItem(STORE_ID_KEY, eid);
+    localStorage.setItem(STORE_ID_FETCHED_KEY, String(Date.now()));
+    return eid || null;
+  } catch {
+    return cached || null;
+  }
 }
 
 export function track(event, props = {}) {
@@ -43,10 +67,11 @@ export function track(event, props = {}) {
   } catch (e) { /* no-op */ }
 }
 
-export function buildInstallUrl(extensionId, source) {
-  // Web Store URL with UTM tags so we can measure which screenshot/CTA drove the install.
-  const base = extensionId
-    ? `https://chrome.google.com/webstore/detail/${extensionId}`
+// Sync version — uses cached store ID. Refresh runs in background.
+export function buildInstallUrl(_unused, source) {
+  const cached = localStorage.getItem(STORE_ID_KEY) || "";
+  const base = cached
+    ? `https://chrome.google.com/webstore/detail/${cached}`
     : `${BACKEND}/api/extension/download`;
   const params = new URLSearchParams({
     utm_source: "snapburst_site",
@@ -56,5 +81,9 @@ export function buildInstallUrl(extensionId, source) {
     sb_variant: getHeroVariant(),
     sb_vid: getVisitorId(),
   });
+  // background refresh — next pageview will use newest value
+  getStoreExtensionId();
   return `${base}?${params.toString()}`;
 }
+
+export { getStoreExtensionId };

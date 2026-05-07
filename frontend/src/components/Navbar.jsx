@@ -27,6 +27,7 @@ export default function Navbar() {
               <NavLink to="/dashboard" className="nb-btn nb-btn-mint text-sm py-2 px-3" data-testid="nav-dashboard">
                 <LayoutDashboard size={16} /> Dashboard
               </NavLink>
+              <NavLink to="/admin/analytics" className="text-sm font-semibold hover:underline hidden md:inline" data-testid="nav-admin-analytics">A/B</NavLink>
               <NavLink to="/settings" className="text-sm font-semibold hover:underline" data-testid="nav-settings">Settings</NavLink>
               <button onClick={async () => { await logout(); nav("/"); }} className="nb-btn text-sm py-2 px-3" data-testid="nav-logout">
                 <LogOut size={16} /> Sign out

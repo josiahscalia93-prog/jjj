@@ -39,6 +39,9 @@ APP_NAME = os.environ.get('APP_NAME', 'snapburst')
 STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET') or None
 PUBLIC_APP_URL = os.environ.get('PUBLIC_APP_URL', 'http://localhost:3000').rstrip('/')
+CHROME_EXTENSION_ID = (os.environ.get('CHROME_EXTENSION_ID') or '').strip()
+ANALYTICS_RATE_LIMIT = int(os.environ.get('ANALYTICS_RATE_LIMIT_PER_MIN', '60'))
+ANALYTICS_TTL_DAYS = int(os.environ.get('ANALYTICS_TTL_DAYS', '90'))
 
 PRICING = {
     "pro":  {"name": "Pro",  "amount": 8.0,  "currency": "usd"},
@@ -205,6 +208,20 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.user_sessions.create_index("session_token", unique=True)
     await db.captures.create_index("share_token", unique=True)
+    # analytics indexes (idempotent) + TTL
+    await db.analytics_events.create_index([("event", 1), ("hero_variant", 1)])
+    try:
+        await db.analytics_events.create_index(
+            "created_at_dt", expireAfterSeconds=ANALYTICS_TTL_DAYS * 24 * 3600,
+        )
+    except Exception as e:
+        logger.warning(f"TTL index create failed (already exists with different opts?): {e}")
+    # Rate-limit sliding-window collection: 70-second TTL (>60s window with margin)
+    await db.analytics_rl.create_index("ip")
+    try:
+        await db.analytics_rl.create_index("ts", expireAfterSeconds=70)
+    except Exception as e:
+        logger.warning(f"rl TTL index: {e}")
     logger.info("SnapBurst API ready")
 
 @app.on_event("shutdown")
@@ -854,14 +871,36 @@ async def transcode_to_gif(capture_id: str, user: dict = Depends(current_user)):
 
 
 # ---------- analytics ----------
+# Mongo-backed sliding-window rate limit (works across pods).
+async def _rate_check(ip: str) -> bool:
+    if not ip:
+        return True
+    # /24 prefix to handle CDN edge IP rotation (real spammers don't span subnets cheaply).
+    parts = ip.split(".")
+    bucket = ".".join(parts[:3]) if len(parts) >= 3 else ip
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=60)
+    await db.analytics_rl.delete_many({"ip": bucket, "ts": {"$lt": cutoff}})
+    n = await db.analytics_rl.count_documents({"ip": bucket})
+    if n >= ANALYTICS_RATE_LIMIT:
+        return False
+    await db.analytics_rl.insert_one({"ip": bucket, "ts": now})
+    return True
+
+
 @app.post("/api/analytics/track")
 async def analytics_track(request: Request):
+    fwd = request.headers.get("x-forwarded-for", "")
+    ip = (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else ""))
+    if not await _rate_check(ip):
+        return Response(content='{"ok":false,"reason":"rate_limit"}', media_type="application/json", status_code=429)
     try:
         raw = await request.json()
     except Exception:
         return {"ok": False}
     if not isinstance(raw, dict):
         return {"ok": False}
+    now = datetime.now(timezone.utc)
     doc = {
         "event": str(raw.get("event") or "")[:64],
         "visitor_id": str(raw.get("visitor_id") or "")[:64] or None,
@@ -871,8 +910,9 @@ async def analytics_track(request: Request):
         "source": str(raw.get("source") or "")[:64] or None,
         "surface": str(raw.get("surface") or "")[:64] or None,
         "ua": (request.headers.get("user-agent") or "")[:200],
-        "ip_prefix": (request.client.host or "").rsplit(".", 1)[0] if request.client else None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "ip_prefix": ip.rsplit(".", 1)[0] if ip else None,
+        "created_at": now.isoformat(),
+        "created_at_dt": now,
     }
     if not doc["event"]:
         return {"ok": False}
@@ -896,6 +936,77 @@ async def analytics_summary(user: dict = Depends(current_user)):
         var = r["_id"]["variant"] or "unknown"
         out.setdefault(ev, {})[var] = {"count": r["count"], "unique_visitors": len(r["visitors"])}
     return out
+
+
+@api_router.get("/analytics/winner")
+async def analytics_winner(user: dict = Depends(current_user)):
+    """Compute conversion rate per hero variant (install_click / page_view) and recommend a winner."""
+    pipeline = [
+        {"$match": {"event": {"$in": ["page_view", "install_click", "download_zip"]}}},
+        {"$group": {
+            "_id": {"event": "$event", "variant": "$hero_variant"},
+            "visitors": {"$addToSet": "$visitor_id"},
+        }},
+    ]
+    rows = await db.analytics_events.aggregate(pipeline).to_list(500)
+    by_variant = {}
+    for r in rows:
+        ev = r["_id"]["event"]
+        var = r["_id"]["variant"] or "unknown"
+        by_variant.setdefault(var, {})[ev] = len(r["visitors"])
+    variants_out = []
+    for var, stats in by_variant.items():
+        pv = stats.get("page_view", 0)
+        ic = stats.get("install_click", 0)
+        dz = stats.get("download_zip", 0)
+        cvr = (ic / pv) if pv > 0 else 0.0
+        variants_out.append({
+            "variant": var,
+            "page_views": pv,
+            "install_clicks": ic,
+            "download_zips": dz,
+            "install_cvr": round(cvr, 4),
+        })
+    variants_out.sort(key=lambda v: v["install_cvr"], reverse=True)
+    # pick a winner only if leader has at least 50 page_views & a 2pp gap
+    winner = None
+    if len(variants_out) >= 2:
+        a, b = variants_out[0], variants_out[1]
+        if a["page_views"] >= 50 and (a["install_cvr"] - b["install_cvr"]) >= 0.02:
+            winner = a["variant"]
+    elif variants_out and variants_out[0]["page_views"] >= 50:
+        winner = variants_out[0]["variant"]
+    return {
+        "variants": variants_out,
+        "winner": winner,
+        "min_traffic_required": 50,
+        "min_cvr_lift_pp": 0.02,
+    }
+
+
+# ---------- Chrome Web Store extension ID ----------
+class StoreIdBody(BaseModel):
+    extension_id: Optional[str] = None
+
+@api_router.get("/extension/store-id")
+async def get_store_id():
+    if CHROME_EXTENSION_ID:
+        return {"extension_id": CHROME_EXTENSION_ID, "source": "env"}
+    cfg = await db.app_config.find_one({"key": "chrome_extension_id"}, {"_id": 0})
+    return {"extension_id": (cfg or {}).get("value", "") or None, "source": "db" if cfg else "unset"}
+
+@api_router.put("/extension/store-id")
+async def set_store_id(body: StoreIdBody, user: dict = Depends(current_user)):
+    eid = (body.extension_id or "").strip()
+    # Chrome extension IDs are 32 lowercase a-p chars
+    if eid and not (len(eid) == 32 and all(c in "abcdefghijklmnop" for c in eid)):
+        raise HTTPException(400, "Invalid Chrome extension ID (must be 32 chars a–p)")
+    await db.app_config.update_one(
+        {"key": "chrome_extension_id"},
+        {"$set": {"value": eid, "updated_by": user["user_id"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"ok": True, "extension_id": eid}
 
 
 @api_router.get("/")

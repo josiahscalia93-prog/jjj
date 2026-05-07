@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 5 backend testing complete. Added /app/backend/tests/test_iteration5.py with 19 new tests covering: TTL & compound indexes (analytics_events.created_at_dt=7776000s, analytics_rl.ts=70s, (event,hero_variant) compound, ip index), POST /api/analytics/track Mongo-backed /24 sliding-window rate limiter (DB-seeded 60 docs => 429; X-Forwarded-For first-IP /24 bucketing verified; under-limit passes), unit-style _rate_check via direct module reload (ANALYTICS_RATE_LIMIT_PER_MIN=5: first 5 True, next 2 False), GET /api/extension/store-id (no-auth, source=='unset' initially), PUT /api/extension/store-id (auth required; rejects short/uppercase/dashes/33-char/out-of-a-p; accepts valid 32-char a-p and persists with source=='db'), GET /api/analytics/winner (auth required, contract shape, winner null below threshold, winner='A' when seeded with A:60pv+30ic vs B:60pv+1ic). 19/19 iteration5 PASSED. Regression: 93/96 PASSED across all suites (1 skipped: ai/chat live, 2 failed: pre-existing /to-gif 500 because ffmpeg is NOT installed in this env — unrelated to iter5).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/captures/{id}/to-gif", "issue": "Returns 500 'ffmpeg not available' before capture/kind validation. ffmpeg binary is missing in current preview env (was present during iter4). Reorder checks: lookup capture -> kind!=recording 404 -> ffmpeg-missing 500 — so non-existent / wrong-kind capture returns 404 even when ffmpeg unavailable. Pre-existing failure, not introduced by iter5."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/test_iteration3.py",
+    "/app/backend/tests/test_iteration2.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration5_results.xml",
+    "/app/test_reports/pytest/all_iter5_regression.xml"
+  ],
+  "action_items": [
+    "Optional: install ffmpeg in preview env (apt-get install -y ffmpeg) OR reorder checks in /api/captures/{id}/to-gif so 404 (capture not found / wrong kind) precedes 500 (ffmpeg missing). 2 iter3 to-gif tests fail due to this env regression, NOT iter5 changes."
+  ],
+  "critical_code_review_comments": [
+    "_rate_check uses /24 prefix correctly (parts[:3]). cutoff cleanup via delete_many before count makes the sliding window mostly-correct (race is fine for analytics). insert_one after count is OK for our threshold semantics (60+1th request => 429). Verified: with limit=5, first 5 pass, next 2 blocked — exact contract.",
+    "POST /api/analytics/track reads X-Forwarded-For first IP correctly (split on ','). Parts[:3] used for both XFF and request.client.host paths. Multi-hop XFF '203.0.113.99, 10.10.10.10, 172.16.0.1' correctly buckets to 203.0.113. Good.",
+    "TTL indexes idempotent on startup — wrapped in try/except to tolerate option drift across deploys. Verified expireAfterSeconds: 7776000 (90d) on analytics_events.created_at_dt and 70 on analytics_rl.ts. (event,hero_variant) compound idx confirmed via index_information().",
+    "GET /api/extension/store-id is correctly mounted on api_router (no auth) and has env-then-db precedence: env wins when CHROME_EXTENSION_ID set, otherwise looks up app_config['chrome_extension_id'] and reports source='db'/'unset'. Returns None when db value is empty string — clean.",
+    "PUT /api/extension/store-id validation: `len(eid)==32 and all(c in 'abcdefghijklmnop' for c in eid)`. Confirmed rejects: '' (empty), 'short' (5), uppercase, dashes, 33-char same-letter, 'z'*32 (out of a-p). Accepts 'a-p'-only 32-char strings. upsert into db.app_config keyed by 'chrome_extension_id' with updated_by + updated_at audit fields. Good.",
+    "GET /api/analytics/winner aggregation: $addToSet visitor_id then len() => unique-visitor counts (same logic as /summary). Picks winner only when len(variants)>=2 AND leader.page_views>=50 AND (cvrA - cvrB)>=0.02. Edge case: single-variant case correctly handled (line 977). Verified seeded scenario: A:60pv+30ic (cvr=0.5), B:60pv+1ic (cvr~0.0167) => winner='A'.",
+    "Carry-over: /api/captures/{id}/to-gif returns 500 before validating capture existence/kind when ffmpeg is missing. Reorder: load capture -> validate kind -> then check ffmpeg. Will fix the 2 iter3 regression failures immediately even without installing ffmpeg.",
+    "Carry-over (from iter3/iter4): post_to_slack/post_to_jira still use sync `requests` inside async handlers; fine at low volume but should move to httpx.AsyncClient for production. analytics aggregation pipelines now have proper indexes — good.",
+    "Minor: analytics_winner pipeline has no $match on hero_variant != null but also doesn't filter timestamp window — winner is computed over ALL retained events (capped by 90-day TTL). Document this, or add ?since=<iso> query param for time-windowed analysis."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration5.py (new — 19 tests)"],
+  "success_rate": {"backend": "100% on iter5 features (19/19); 96.9% overall (93/96; 2 pre-existing ffmpeg-missing failures + 1 ai/chat skip)", "frontend": "n/a (not in scope)"},
+  "test_credentials": "alice@example.com / secret123 (per /app/memory/test_credentials.md). Tests register fresh TEST_it5_<uuid>@example.com per module.",
+  "seed_data_creation": "Per run (cleaned up in finally blocks): db.analytics_rl docs for /24s 192.0.2 / 198.51.100 / 203.0.113 / 10.20.30 (TEST-NET ranges, never real traffic); ~151 db.analytics_events docs prefixed TEST_it5_* for winner test. db.app_config 'chrome_extension_id' is reset before/after each PUT test. 1 user TEST_it5_*@example.com.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All iteration 5 features GREEN: rate limiter (Mongo-backed /24 sliding window, 60 req/min default, 70s TTL cleanup), Chrome extension ID config (env-or-DB precedence with strict 32-char a-p validation), winner detection (>=50 pv AND >=2pp CVR gap). Total suite now 96 tests across 5 files. Run: `cd /app/backend && pytest tests/ -v`. Two iter3 to-gif tests fail because ffmpeg is missing from current preview env — install ffmpeg OR reorder checks in /api/captures/{id}/to-gif. Not an iter5 issue. iter5 tests use pymongo (sync) directly for DB seed/cleanup to avoid motor event-loop conflicts.",
+  "rca of the issue": "iter3 to-gif failures: server.py:813 raises 500 'ffmpeg not available' BEFORE looking up the capture, so even nonexistent capture or screenshot-kind capture (which should both be 404) get short-circuited to 500. Fix: move `if not shutil.which('ffmpeg')` AFTER the capture lookup and kind check. Or install ffmpeg via apt. Pre-existing — was masked in iter4 because ffmpeg was installed."
+}
