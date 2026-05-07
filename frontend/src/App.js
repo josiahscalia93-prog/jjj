@@ -14,6 +14,8 @@ import Settings from "./pages/Settings";
 import Privacy from "./pages/Privacy";
 import StorePreview from "./pages/StorePreview";
 import AdminAnalytics from "./pages/AdminAnalytics";
+import GetExtension from "./pages/GetExtension";
+import SubmitChecklist from "./pages/SubmitChecklist";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -37,6 +39,9 @@ function Routed() {
       <Route path="/capture/:id" element={<Protected><CaptureDetail /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
       <Route path="/store-preview" element={<StorePreview />} />
+      <Route path="/get-extension" element={<GetExtension />} />
+      <Route path="/download" element={<GetExtension />} />
+      <Route path="/submit-checklist" element={<Protected><SubmitChecklist /></Protected>} />
       <Route path="/admin/analytics" element={<Protected><AdminAnalytics /></Protected>} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/share/:token" element={<SharePage />} />

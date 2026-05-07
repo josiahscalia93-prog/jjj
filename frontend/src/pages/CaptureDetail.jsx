@@ -3,8 +3,10 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import AIChat from "../components/AIChat";
 import AnnotationEditor from "../components/AnnotationEditor";
+import BrowserGifConverter from "../components/BrowserGifConverter";
+import ShareQR from "../components/ShareQR";
 import { api } from "../lib/api";
-import { ArrowLeft, Share2, Copy, Slack, Mail, ExternalLink, FileImage } from "lucide-react";
+import { ArrowLeft, Share2, Copy, Slack, Mail, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 export default function CaptureDetail() {
@@ -14,7 +16,6 @@ export default function CaptureDetail() {
   const [videoUrl, setVideoUrl] = useState(null);
   const [integ, setInteg] = useState({ slack_connected: false, jira_connected: false });
   const [posting, setPosting] = useState(false);
-  const [convertingGif, setConvertingGif] = useState(false);
 
   const refresh = async () => {
     try { const { data } = await api.get(`/captures/${id}`); setCap(data); }
@@ -68,15 +69,6 @@ export default function CaptureDetail() {
   const trelloIntent = () => {
     window.open(`https://trello.com/add-card?desc=${encodeURIComponent(shareUrl)}&name=${encodeURIComponent(cap.title)}`, "_blank");
   };
-  const convertToGif = async () => {
-    setConvertingGif(true);
-    try {
-      const { data } = await api.post(`/captures/${cap.id}/to-gif`);
-      toast.success("GIF created", { action: { label: "Open", onClick: () => nav(`/capture/${data.id}`) } });
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "GIF conversion failed");
-    } finally { setConvertingGif(false); }
-  };
 
   return (
     <div className="min-h-screen bg-[#FAFAFA]">
@@ -99,10 +91,8 @@ export default function CaptureDetail() {
               <div className="nb bg-black p-2">
                 <video src={videoUrl} controls className="w-full max-h-[70vh]" data-testid="recording-player" />
               </div>
-              <div className="mt-3 flex gap-2">
-                <button onClick={convertToGif} disabled={convertingGif} className="nb-btn nb-btn-mint !py-2 !px-3 text-sm" data-testid="convert-gif-btn">
-                  <FileImage size={14}/> {convertingGif ? "Transcoding…" : "Convert to GIF"}
-                </button>
+              <div className="mt-3 flex gap-2 flex-wrap">
+                <BrowserGifConverter capture={cap} onCreated={(d) => nav(`/capture/${d.id}`)} />
               </div>
             </>
           ) : (
@@ -126,6 +116,9 @@ export default function CaptureDetail() {
               </button>
               <button onClick={trelloIntent} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-trello">Trello <ExternalLink size={10}/></button>
               <button onClick={gmailIntent} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-gmail"><Mail size={12}/>Gmail</button>
+            </div>
+            <div className="mt-2">
+              <ShareQR url={shareUrl} />
             </div>
             {(!integ.slack_connected || !integ.jira_connected) && (
               <Link to="/settings" className="block text-xs underline mt-2" data-testid="connect-integrations">* Connect in Settings</Link>

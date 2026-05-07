@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import { API } from "../lib/api";
+import ShareQR from "../components/ShareQR";
 import { Camera, Download } from "lucide-react";
 
 export default function SharePage() {
@@ -38,6 +39,9 @@ export default function SharePage() {
           <a href={fileUrl} download className="nb-btn !py-2 !px-3 text-sm bg-white" data-testid="download-btn">
             <Download size={14}/> Download
           </a>
+          <div className="hidden sm:block w-28">
+            <ShareQR url={typeof window !== "undefined" ? window.location.href : ""} label="Open this share on mobile" />
+          </div>
         </div>
       </header>
       <main className="max-w-5xl mx-auto px-5 sm:px-8 py-10">
