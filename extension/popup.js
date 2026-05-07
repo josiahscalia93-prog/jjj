@@ -19,7 +19,16 @@ async function refreshAuthBanner() {
 async function uploadBlob(blob, kind, title, ext, durationSec) {
   const token = await getToken();
   if (!token) {
-    chrome.tabs.create({ url: `${APP_BASE}/login?from=extension` });
+    // Fallback: save locally so the user is never blocked.
+    const url = URL.createObjectURL(blob);
+    const filename = `snapburst-${Date.now()}.${ext}`;
+    try {
+      await chrome.downloads.download({ url, filename, saveAs: false });
+      status("Saved to Downloads ✓");
+    } catch (e) { status("Download failed"); }
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    // Show non-blocking connect prompt
+    $("auth-banner").classList.remove("hide");
     return;
   }
   const fd = new FormData();
@@ -180,8 +189,6 @@ $("open-dashboard").addEventListener("click", () => chrome.tabs.create({ url: AP
 $("open-app").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: APP_BASE }); });
 $("connect").addEventListener("click", () => chrome.tabs.create({ url: APP_BASE + "/login?from=extension" }));
 
-chrome.runtime.onMessageExternal?.addListener?.((msg, sender, send) => {
-  if (msg?.type === "snapburst-token" && msg.token) { setToken(msg.token); send({ ok: true }); }
-});
+// (chrome.runtime.onMessageExternal lives in background.js — popups don't live long enough.)
 
 (async () => { await refreshAuthBanner(); await renderRecent(); })();

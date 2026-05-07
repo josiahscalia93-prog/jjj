@@ -853,6 +853,51 @@ async def transcode_to_gif(capture_id: str, user: dict = Depends(current_user)):
     return doc
 
 
+# ---------- analytics ----------
+@app.post("/api/analytics/track")
+async def analytics_track(request: Request):
+    try:
+        raw = await request.json()
+    except Exception:
+        return {"ok": False}
+    if not isinstance(raw, dict):
+        return {"ok": False}
+    doc = {
+        "event": str(raw.get("event") or "")[:64],
+        "visitor_id": str(raw.get("visitor_id") or "")[:64] or None,
+        "hero_variant": str(raw.get("hero_variant") or "")[:8] or None,
+        "path": str(raw.get("path") or "")[:200] or None,
+        "referrer": str(raw.get("referrer") or "")[:300] or None,
+        "source": str(raw.get("source") or "")[:64] or None,
+        "surface": str(raw.get("surface") or "")[:64] or None,
+        "ua": (request.headers.get("user-agent") or "")[:200],
+        "ip_prefix": (request.client.host or "").rsplit(".", 1)[0] if request.client else None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if not doc["event"]:
+        return {"ok": False}
+    await db.analytics_events.insert_one(doc)
+    return {"ok": True}
+
+
+@api_router.get("/analytics/summary")
+async def analytics_summary(user: dict = Depends(current_user)):
+    pipeline = [
+        {"$group": {
+            "_id": {"event": "$event", "variant": "$hero_variant"},
+            "count": {"$sum": 1},
+            "visitors": {"$addToSet": "$visitor_id"},
+        }},
+    ]
+    rows = await db.analytics_events.aggregate(pipeline).to_list(500)
+    out = {}
+    for r in rows:
+        ev = r["_id"]["event"]
+        var = r["_id"]["variant"] or "unknown"
+        out.setdefault(ev, {})[var] = {"count": r["count"], "unique_visitors": len(r["visitors"])}
+    return out
+
+
 @api_router.get("/")
 async def root():
     return {"app": "SnapBurst", "ok": True}

@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 4 backend testing complete. Added /app/backend/tests/test_iteration4.py with 16 new tests covering POST /api/analytics/track (no-auth, sanitization, rejection paths), GET /api/analytics/summary (auth + unique-visitor aggregation + unknown-variant bucketing), and extension manifest v1.0.2 compliance (permissions has 'notifications', no 'tabCapture'; optional_host_permissions has '<all_urls>'; host_permissions tight to capture-annotate.preview.emergentagent.com only; description <=132 chars). All 16 new + 61 regression = 77/77 PASSED.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/test_iteration3.py",
+    "/app/backend/tests/test_iteration2.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration4_results.xml",
+    "/app/test_reports/pytest/all_iter4_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /api/analytics/track is mounted on app (not api_router) at line 857 because it must accept no-auth events; URL prefix '/api/analytics/track' is correct and reachable through the ingress. Good.",
+    "Truncation slicing on str(raw.get(...)) is robust — converts non-string inputs (numbers/bools/None) to string first, then slices. No 500 path observed for malformed/oversized fields. Verified via 5000-char field test.",
+    "JSON parse exception is caught broadly and returns {ok:false}; non-dict (list/scalar) is also rejected. Empty event after coercion ('') -> {ok:false}. All match contract.",
+    "GET /api/analytics/summary uses MongoDB aggregation with $addToSet on visitor_id then len() in Python — correct unique-visitor count. Verified vis_a x2 + vis_b x1 -> count=3, unique=2 for variant A.",
+    "request.client.host could be None behind some proxies; current code guards with `if request.client else None` — good. ip_prefix uses rsplit which is safe on empty string.",
+    "Manifest 1.0.2 served from /app/extension/manifest.json — host_permissions limited to https://capture-annotate.preview.emergentagent.com/* only (1 entry). description is 130 chars (<=132). All compliance gates green.",
+    "Carry-over (non-blocking): /api/analytics/track has NO rate limiting. A bot could spam the endpoint and inflate counts / fill mongo. Recommend cheap per-IP throttling (e.g., 60 req/min) before public launch.",
+    "Carry-over: analytics_events collection has no TTL or index on (event, hero_variant) — aggregation will linear-scan. Add index {event:1, hero_variant:1} and a created_at TTL (e.g., 90 days) before scale.",
+    "Carry-over (from iter3): post_to_slack/post_to_jira still use sync requests inside async; build_extension_zip rebuilds on every call (zips manifest+code each time, ~21KB so fine for now)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration4.py (new — 16 tests)"],
+  "success_rate": {"backend": "100% (77/77)", "frontend": "n/a (not in scope)"},
+  "test_credentials": "alice@example.com / secret123 (per /app/memory/test_credentials.md). Tests register fresh TEST_it4_<uuid>@example.com per module.",
+  "seed_data_creation": "Per run: 1 TEST_it4_*@ user; ~6 analytics_events docs with TEST_it4_evt_* / TEST_it4_novar_* prefixes (safe to ignore — never read by app code outside /api/analytics/summary aggregation). Recommend periodic cleanup of analytics_events where event LIKE 'TEST_it4_%'.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 features all GREEN: POST /api/analytics/track (no auth, mounted on app not api_router, returns {ok:true|false}, truncates long fields), GET /api/analytics/summary (auth, returns {event:{variant:{count, unique_visitors}}} with 'unknown' variant bucket for missing hero_variant), manifest v1.0.2 (notifications perm, no tabCapture, optional <all_urls>, tight host_permissions, 130-char description). Test suites: backend_test.py(24) + test_iteration2.py(24) + test_iteration3.py(13) + test_iteration4.py(16) = 77 total. Run: pytest backend/tests/ -v. Frontend hero-variant A/B + UTM install URLs were NOT in this iteration's testing scope (review_request specified backend-only).",
+  "rca of the issue": "n/a — no failures."
+}

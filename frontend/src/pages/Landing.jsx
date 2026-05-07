@@ -1,9 +1,10 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { toast } from "sonner";
+import { track, getHeroVariant, buildInstallUrl } from "../lib/analytics";
 import { ArrowRight, Camera, Video, Pencil, Share2, Sparkles, Check, Star, Mic, MonitorSmartphone, Wand2, Cloud, Download } from "lucide-react";
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -34,29 +35,43 @@ export default function Landing() {
 }
 
 function Hero() {
+  const [variant, setVariant] = useState("A");
+  useEffect(() => { setVariant(getHeroVariant()); track("page_view", { surface: "landing" }); }, []);
+
+  const headlines = {
+    A: { l1: "Capture the screen.", l2: "Annotate it.", l3a: "Share in", l3b: "one click." },
+    B: { l1: "Record. Mark up.",    l2: "Send the link.", l3a: "Done in", l3b: "60 seconds." },
+  };
+  const sub = {
+    A: "A joyful screen capture & screen recorder for Chrome. Snap full pages, record HD video with webcam + mic, mark it up, and ship instant share links — straight to Slack, Trello, Jira & Gmail.",
+    B: "The fastest way to turn a screen into a shareable explainer. Record in 4K, draw arrows that pop, post to Slack/Jira in one click. No watermark. No time limit.",
+  };
+  const h = headlines[variant];
+
   return (
-    <section className="relative overflow-hidden border-b-2 border-[#0F0F0F]" data-testid="hero-section">
+    <section className="relative overflow-hidden border-b-2 border-[#0F0F0F]" data-testid="hero-section" data-variant={variant}>
       <div className="max-w-7xl mx-auto px-5 sm:px-8 py-16 sm:py-24 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
         <div className="lg:col-span-7 fade-up">
           <div className="inline-flex items-center gap-2 nb-sm bg-[#A7F3D0] px-3 py-1 mb-6">
             <Sparkles size={14} /> <span className="label-mono">v1.0 — now on Chrome Web Store</span>
           </div>
           <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-black leading-[0.95] tracking-tight">
-            Capture the screen. <br />
+            {h.l1} <br />
             <span className="bg-[#FDE047] px-3 inline-block border-2 border-[#0F0F0F] rounded-xl shadow-[6px_6px_0_#0F0F0F] -rotate-1 my-2">
-              Annotate it.
+              {h.l2}
             </span> <br />
-            Share in <span className="underline decoration-[#FB923C] decoration-[10px] underline-offset-4">one click</span>.
+            {h.l3a} <span className="underline decoration-[#FB923C] decoration-[10px] underline-offset-4">{h.l3b}</span>
           </h1>
-          <p className="mt-6 text-lg text-zinc-700 max-w-xl">
-            SnapBurst is a joyful screen capture & screen recorder for Chrome. Snap full pages, record HD video with webcam + mic,
-            mark it up, and ship instant share links — straight to Slack, Trello, Jira & Gmail.
-          </p>
+          <p className="mt-6 text-lg text-zinc-700 max-w-xl">{sub[variant]}</p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link to="/register" className="nb-btn nb-btn-tangerine text-base" data-testid="hero-cta-primary">
+            <a href={buildInstallUrl(null, `hero_${variant}`)}
+               onClick={() => track("install_click", { source: `hero_${variant}` })}
+               className="nb-btn nb-btn-tangerine text-base" data-testid="hero-cta-primary">
               Add to Chrome — Free <ArrowRight size={18} />
-            </Link>
-            <a href={`${BACKEND}/api/extension/download`} className="nb-btn nb-btn-yellow text-base" data-testid="hero-download-extension">
+            </a>
+            <a href={`${BACKEND}/api/extension/download`}
+               onClick={() => track("download_zip", { source: `hero_${variant}` })}
+               className="nb-btn nb-btn-yellow text-base" data-testid="hero-download-extension">
               <Download size={18}/> Download .zip
             </a>
             <a href="#features" className="nb-btn text-base bg-white" data-testid="hero-cta-secondary">
@@ -69,7 +84,7 @@ function Hero() {
               <img src={CREATOR2} className="w-8 h-8 rounded-full border-2 border-[#0F0F0F] object-cover" alt="" />
               <div className="w-8 h-8 rounded-full bg-[#FBCFE8] border-2 border-[#0F0F0F] grid place-items-center text-xs">+2k</div>
             </div>
-            <span>Loved by creators · No watermark · Free forever</span>
+            <span>Variant {variant} · Loved by creators · No watermark · Free forever</span>
           </div>
         </div>
         <div className="lg:col-span-5 relative">

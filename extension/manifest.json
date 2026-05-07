@@ -2,18 +2,21 @@
   "manifest_version": 3,
   "name": "SnapBurst — Screen Capture, Record & Share",
   "short_name": "SnapBurst",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Screenshot, full-page capture, and HD screen + webcam + mic recording. Annotate and share via Slack, Trello, Jira & Gmail.",
   "permissions": [
     "activeTab",
     "tabs",
     "storage",
     "downloads",
-    "tabCapture",
-    "scripting"
+    "scripting",
+    "notifications"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://capture-annotate.preview.emergentagent.com/*"
   ],
   "background": {
     "service_worker": "background.js"
