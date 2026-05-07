@@ -1,0 +1,131 @@
+{
+  "theme_and_archetype": {
+    "domain": "Productivity & Creator Tool (Screen Capture)",
+    "theme": "Light",
+    "archetype": "Neo-Brutalist Soft Play (Variation of Archetype 3 + Archetype 6)",
+    "vibe": "Playful, joyful, modern, energetic, creative, approachable",
+    "rationale": "Appeals to creators and designers without feeling like a boring B2B SaaS. Hard black borders mix with soft pastels to avoid looking childish while remaining energetic."
+  },
+  "design_principles": [
+    "Neo-Brutalism + Pastel: Sharp hard-edged black borders mixed with vibrant, soft pastel backgrounds.",
+    "Asymmetry creates tension: Use offset bento grids and avoid center-aligning everything.",
+    "Editorial Motion: Use a slow marquee for integrations (Slack, Trello, Jira) instead of a standard grid.",
+    "Generous Spacing: Heavy padding inside containers so text breathes alongside hard borders."
+  ],
+  "typography": {
+    "fonts": {
+      "headings": "Clash Display, sans-serif",
+      "body": "Outfit, sans-serif",
+      "mono_accents": "IBM Plex Mono, monospace"
+    },
+    "hierarchy": {
+      "h1": "text-5xl sm:text-6xl tracking-tight leading-none font-black",
+      "h2": "text-3xl sm:text-4xl tracking-tight font-bold",
+      "h3": "text-2xl sm:text-3xl tracking-tight font-bold",
+      "body": "text-base sm:text-lg leading-relaxed",
+      "labels": "text-xs tracking-[0.2em] uppercase font-mono"
+    },
+    "rules": [
+      "Headings never use Inter, Roboto, or generic fonts.",
+      "Never center text by default; align left for readability in brutalist setups.",
+      "Use mono font for overlines, labels, and specific extension details."
+    ]
+  },
+  "color_system": {
+    "base": {
+      "background": "#FAFAFA",
+      "surface": "#FFFFFF",
+      "black": "#0F0F0F"
+    },
+    "accents": {
+      "butter_yellow": "#FDE047",
+      "pale_mint": "#A7F3D0",
+      "bubblegum_pink": "#FBCFE8",
+      "vivid_tangerine": "#FB923C",
+      "electric_blue": "#93C5FD"
+    },
+    "text": {
+      "primary": "#0F0F0F",
+      "secondary": "#3F3F46",
+      "light_on_dark": "#FFFFFF"
+    },
+    "rules": [
+      "Do NOT use teal green (#1B93A4) or generic purple-blue gradients.",
+      "Buttons/CTAs should be vivid yellow or pink with black text and hard black shadows.",
+      "Borders should always be pure or near black (#0F0F0F)."
+    ]
+  },
+  "layout_and_spacing": {
+    "spacing_scale": "Tailwind scale (p-4, p-8, p-12, p-20, p-32)",
+    "container_padding": "Generous spacing. Any container with a border must have p-6 or p-8.",
+    "marketing_grid": "Mode A 'Tetris' Bento Grid (grid-cols-1 md:grid-cols-12, wide gaps, asymmetrical spans).",
+    "dashboard_grid": "Mode B 'Control Room' Grid (grid-cols-1 md:grid-cols-3, dense, full height).",
+    "general": [
+      "Images shouldn't exceed 80vh on mobile.",
+      "Asymmetry is preferred over perfect symmetry."
+    ]
+  },
+  "surfaces_and_micro_themes": {
+    "primary_style": "Neumorphism (Tactile Neo-Brutalist)",
+    "implementation": {
+      "border": "border-2 border-[#0F0F0F]",
+      "shadow": "shadow-[4px_4px_0px_0px_rgba(15,15,15,1)]",
+      "hover": "hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_rgba(15,15,15,1)] transition-all",
+      "radius": "rounded-xl or rounded-2xl"
+    },
+    "glassmorphism": "Only use for floating AI assistant or sticky header (bg-white/80 backdrop-blur-xl border-b-2 border-[#0F0F0F])."
+  },
+  "components": {
+    "buttons": "Shadcn components heavily modified: solid bright colors, black borders, hard offset shadows.",
+    "cards": "Bento style. Varied background pastel colors (yellow, mint, pink) with black borders.",
+    "inputs": "Shadcn inputs with border-2 border-[#0F0F0F] focus:ring-0 focus:border-vivid_tangerine shadow-[2px_2px_0px_0px_rgba(15,15,15,1)].",
+    "ai_widget": "Floating panel bottom right. Solid pastel background, hard black border, icon-heavy.",
+    "annotation_editor": "A full-width canvas area. Toolbar floating at bottom or left side with monochromatic or bright icon buttons.",
+    "integrations_marquee": "Continuous slow scrolling marquee (react-fast-marquee) for Trello, Jira, Slack, Gmail.",
+    "icons": "Phosphor Icons (Duotone or Bold weight) or lucide-react with high stroke-width."
+  },
+  "media": {
+    "hero_abstract_shapes": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/d376a859-58a6-4e81-863c-9aeae3b01e94/images/bcf502673c6ee4325cca3bcbd97ef08bebfbb02631a82f1832d37ce81ad8f524.png",
+      "description": "Abstract joyful 3D shapes on vivid yellow background",
+      "usage": "Marketing page hero background or feature accent image."
+    },
+    "feature_camera_chat": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/d376a859-58a6-4e81-863c-9aeae3b01e94/images/c89c5fcb08a15a2966bb901e57a955569c28c9e662b2fabe46eda079d7258248.png",
+      "description": "Playful modern 3D illustration of a video camera and chat bubble",
+      "usage": "Feature showcase section (Screen Recording & Annotation)."
+    },
+    "creative_workspace": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/d376a859-58a6-4e81-863c-9aeae3b01e94/images/5c5ffecdf72fe9a85fb5255cb619993167233da8086ca18eadb74f04327dff50.png",
+      "description": "Creative colorful workspace top-down view",
+      "usage": "Use in 'For Creators & Teams' block or Dashboard empty state background."
+    },
+    "creator_smiling_1": {
+      "url": "https://images.unsplash.com/photo-1758876019084-cb8f8556d8db?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwzfHxjcmVhdG9yJTIwdXNpbmclMjBsYXB0b3AlMjBzbWlsaW5nfGVufDB8fHx8MTc3ODE2NjQwMnww&ixlib=rb-4.1.0&q=85",
+      "description": "Young woman with headphones working on laptop",
+      "usage": "Testimonial section or Demo user avatar."
+    },
+    "creator_smiling_2": {
+      "url": "https://images.unsplash.com/photo-1758873272955-3b066dd11c6b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHw0fHxjcmVhdG9yJTIwdXNpbmclMjBsYXB0b3AlMjBzbWlsaW5nfGVufDB8fHx8MTc3ODE2NjQwMnww&ixlib=rb-4.1.0&q=85",
+      "description": "Young woman working on laptop in modern office",
+      "usage": "Feature section for 'Direct integrations with Slack/Jira'."
+    }
+  },
+  "motion_and_interactions": {
+    "hover_states": "Buttons press down (translate down/right, reduce shadow). High contrast changes.",
+    "page_transitions": "Staggered fade-up for bento grid cards.",
+    "accessibility": "Ensure focus rings are highly visible (focus:ring-2 focus:ring-black focus:ring-offset-2)."
+  },
+  "instructions_to_main_agent": [
+    "Build a Hybrid App (Marketing + SaaS Dashboard). Output code in .jsx or .js as per the current environment (not .tsx).",
+    "Ensure proper routing (e.g. '/' for marketing, '/dashboard' for app, '/recording/:id' for detail view).",
+    "Use pure HTML/Tailwind for the marketing layout bento grids, avoiding rigid generic components.",
+    "Install @phosphor-icons/react or use lucide-react.",
+    "Implement neo-brutalism: All buttons, cards, and input fields MUST have 'border-2 border-[#0F0F0F]' and a hard drop shadow 'shadow-[4px_4px_0_0_#0F0F0F]'.",
+    "For the integrations marquee, use react-fast-marquee or CSS animations. Make the text/logos large.",
+    "CRITICAL: Include 'data-testid' attribute on ALL interactive and key informational elements.",
+    "Use the provided media URLs exclusively. Do not use generic placeholders like via.placeholder.com.",
+    "Do NOT use teal (#1B93A4) or purple (#9D4CDD) slop.",
+    "AI widget should be a floating interface with upload capability and chat UI."
+  ]
+}
