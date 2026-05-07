@@ -141,8 +141,14 @@ class TestBilling:
         for k in ("status", "payment_status", "amount_total", "currency"):
             assert k in body, f"missing {k}"
         assert body["currency"].lower() == "usd"
-        # initially not paid (we haven't completed checkout)
-        assert body["payment_status"] in ("unpaid", "no_payment_required", "paid")
+        # initially not paid (we haven't completed checkout). 'initiated' is the
+        # DB-fallback value used when the Emergent Stripe proxy returns
+        # "No such checkout.session" in test mode.
+        assert body["payment_status"] in ("unpaid", "no_payment_required", "paid", "initiated")
+        # status should reflect an open/initiated checkout session
+        assert body["status"] in ("open", "complete", "initiated")
+        # amount must be a positive integer in cents (pro=800, team=1400)
+        assert isinstance(body["amount_total"], int) and body["amount_total"] > 0
         assert "_id" not in body
 
     def test_checkout_status_unauth(self, user):
@@ -151,6 +157,14 @@ class TestBilling:
             pytest.skip("no checkout session id")
         r = requests.get(f"{API}/billing/checkout-status/{sid}", timeout=15)
         assert r.status_code == 401
+
+    def test_checkout_status_nonexistent_returns_404(self, user):
+        bogus = f"cs_test_NONEXISTENT_{uuid.uuid4().hex}"
+        r = requests.get(f"{API}/billing/checkout-status/{bogus}",
+                         headers=H(user["token"]), timeout=20)
+        assert r.status_code == 404, f"expected 404 got {r.status_code}: {r.text}"
+        detail = r.json().get("detail", "")
+        assert "Unknown session" in detail or "unknown" in detail.lower()
 
     def test_webhook_stripe_no_signature_returns_200_not_404(self):
         """Webhook is mounted directly on app, path /api/webhook/stripe.

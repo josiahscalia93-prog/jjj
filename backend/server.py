@@ -17,6 +17,7 @@ import requests
 import io
 import base64
 import json
+import asyncio
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from emergentintegrations.payments.stripe.checkout import (
@@ -516,29 +517,39 @@ async def billing_checkout(body: CheckoutBody, request: Request, user: dict = De
 async def billing_status(session_id: str, request: Request, user: dict = Depends(current_user)):
     if not STRIPE_API_KEY:
         raise HTTPException(500, "Stripe not configured")
-    host_url = str(request.base_url).rstrip("/")
-    sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
-    try:
-        status = await sc.get_checkout_status(session_id)
-    except Exception as e:
-        raise HTTPException(500, f"Stripe error: {e}")
     txn = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
-    if txn and txn.get("payment_status") != "paid" and status.payment_status == "paid":
-        # promote user, idempotent
-        tier = txn.get("tier") or status.metadata.get("tier")
+    if not txn:
+        raise HTTPException(404, "Unknown session")
+    # Try live retrieval; fall back to DB on proxy failure (test-mode proxy limitation).
+    host_url = str(request.base_url).rstrip("/")
+    StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
+    import stripe as stripe_sdk
+    payment_status = txn.get("payment_status", "initiated")
+    status_str = txn.get("status", "open")
+    amount_total = int((txn.get("amount") or 0) * 100)
+    currency = txn.get("currency", "usd")
+    try:
+        session = await asyncio.to_thread(stripe_sdk.checkout.Session.retrieve, session_id)
+        payment_status = session.get("payment_status") or payment_status
+        status_str = session.get("status") or status_str
+        amount_total = session.get("amount_total") or amount_total
+        currency = session.get("currency") or currency
+    except Exception as e:
+        logger.info(f"checkout-status live retrieval unavailable, using DB: {e}")
+    if txn.get("payment_status") != "paid" and payment_status == "paid":
         await db.users.update_one(
             {"user_id": txn["user_id"]},
-            {"$set": {"plan": tier, "plan_updated_at": datetime.now(timezone.utc).isoformat()}},
+            {"$set": {"plan": txn.get("tier"), "plan_updated_at": datetime.now(timezone.utc).isoformat()}},
         )
         await db.payment_transactions.update_one(
             {"session_id": session_id},
-            {"$set": {"payment_status": "paid", "status": status.status, "paid_at": datetime.now(timezone.utc).isoformat()}},
+            {"$set": {"payment_status": "paid", "status": status_str, "paid_at": datetime.now(timezone.utc).isoformat()}},
         )
     return {
-        "status": status.status,
-        "payment_status": status.payment_status,
-        "amount_total": status.amount_total,
-        "currency": status.currency,
+        "status": status_str,
+        "payment_status": payment_status,
+        "amount_total": amount_total,
+        "currency": currency,
     }
 
 @app.post("/api/webhook/stripe")
