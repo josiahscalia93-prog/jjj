@@ -1,6 +1,12 @@
 import { Link } from "react-router-dom";
+import { useState } from "react";
 import Navbar from "../components/Navbar";
-import { ArrowRight, Camera, Video, Pencil, Share2, Sparkles, Check, Star, Mic, MonitorSmartphone, Wand2, Cloud } from "lucide-react";
+import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { toast } from "sonner";
+import { ArrowRight, Camera, Video, Pencil, Share2, Sparkles, Check, Star, Mic, MonitorSmartphone, Wand2, Cloud, Download } from "lucide-react";
+
+const BACKEND = process.env.REACT_APP_BACKEND_URL;
 
 const HERO_IMG = "https://static.prod-images.emergentagent.com/jobs/d376a859-58a6-4e81-863c-9aeae3b01e94/images/bcf502673c6ee4325cca3bcbd97ef08bebfbb02631a82f1832d37ce81ad8f524.png";
 const FEATURE_IMG = "https://static.prod-images.emergentagent.com/jobs/d376a859-58a6-4e81-863c-9aeae3b01e94/images/c89c5fcb08a15a2966bb901e57a955569c28c9e662b2fabe46eda079d7258248.png";
@@ -50,6 +56,9 @@ function Hero() {
             <Link to="/register" className="nb-btn nb-btn-tangerine text-base" data-testid="hero-cta-primary">
               Add to Chrome — Free <ArrowRight size={18} />
             </Link>
+            <a href={`${BACKEND}/api/extension/download`} className="nb-btn nb-btn-yellow text-base" data-testid="hero-download-extension">
+              <Download size={18}/> Download .zip
+            </a>
             <a href="#features" className="nb-btn text-base bg-white" data-testid="hero-cta-secondary">
               See how it works
             </a>
@@ -163,10 +172,23 @@ function BigShowcase() {
 }
 
 function Pricing() {
+  const { user } = useAuth();
+  const [busy, setBusy] = useState(null);
+
+  const checkout = async (tier) => {
+    if (!user) { window.location.href = "/register?next=pricing"; return; }
+    setBusy(tier);
+    try {
+      const { data } = await api.post("/billing/checkout", { tier, origin_url: window.location.origin });
+      window.location.href = data.url;
+    } catch (e) { toast.error(e.response?.data?.detail || "Checkout failed"); }
+    finally { setBusy(null); }
+  };
+
   const tiers = [
-    { name: "Free", price: "$0", color: "bg-white", desc: "For curious creators", features: ["Unlimited screenshots","Unlimited recording (1080p)","Cloud library 1GB","Public share links","AI assistant (limited)"], cta: "Start free", testid: "tier-free" },
-    { name: "Pro", price: "$8", color: "bg-[#FDE047]", desc: "For makers and pros", features: ["4K recording","100GB cloud storage","Custom branding","Slack / Trello / Jira hand-off","Unlimited AI"], cta: "Go Pro", testid: "tier-pro", featured: true },
-    { name: "Team", price: "$14", color: "bg-[#A7F3D0]", desc: "For growing squads", features: ["Everything in Pro","Shared library","SSO + admin","Workspace analytics","Priority support"], cta: "Start team trial", testid: "tier-team" },
+    { name: "Free", key: "free", price: "$0", color: "bg-white", desc: "For curious creators", features: ["Unlimited screenshots","Unlimited recording (1080p)","Cloud library 1GB","Public share links","AI assistant (limited)"], cta: "Start free", testid: "tier-free" },
+    { name: "Pro", key: "pro", price: "$8", color: "bg-[#FDE047]", desc: "For makers and pros", features: ["4K recording","100GB cloud storage","Custom branding","Slack / Trello / Jira hand-off","Unlimited AI"], cta: "Go Pro", testid: "tier-pro", featured: true },
+    { name: "Team", key: "team", price: "$14", color: "bg-[#A7F3D0]", desc: "For growing squads", features: ["Everything in Pro","Shared library","SSO + admin","Workspace analytics","Priority support"], cta: "Start team trial", testid: "tier-team" },
   ];
   return (
     <section id="pricing" className="py-20 sm:py-28 border-b-2 border-[#0F0F0F]">
@@ -189,7 +211,13 @@ function Pricing() {
               <ul className="mt-5 space-y-2 text-sm">
                 {t.features.map(f => <li key={f} className="flex items-center gap-2"><Check size={16}/>{f}</li>)}
               </ul>
-              <Link to="/register" className="nb-btn nb-btn-ink mt-6 w-full !text-white">{t.cta}</Link>
+              {t.key === "free" ? (
+                <Link to="/register" className="nb-btn nb-btn-ink mt-6 w-full !text-white" data-testid={`${t.testid}-cta`}>{t.cta}</Link>
+              ) : (
+                <button onClick={() => checkout(t.key)} disabled={busy === t.key} className="nb-btn nb-btn-ink mt-6 w-full !text-white" data-testid={`${t.testid}-cta`}>
+                  {busy === t.key ? "Redirecting…" : t.cta}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -270,7 +298,11 @@ function Footer() {
     <footer className="py-10 bg-[#0F0F0F] text-zinc-300 text-sm">
       <div className="max-w-7xl mx-auto px-5 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="font-display text-white font-bold text-lg">SnapBurst</div>
-        <div className="flex gap-6"><a href="#" className="hover:text-white">Privacy</a><a href="#" className="hover:text-white">Terms</a><a href="#" className="hover:text-white">Contact</a></div>
+        <div className="flex gap-6">
+          <Link to="/privacy" className="hover:text-white">Privacy</Link>
+          <a href="#" className="hover:text-white">Terms</a>
+          <a href="#" className="hover:text-white">Contact</a>
+        </div>
         <div>© {new Date().getFullYear()} SnapBurst Labs</div>
       </div>
     </footer>

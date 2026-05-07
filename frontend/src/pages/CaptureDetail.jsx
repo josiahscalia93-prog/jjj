@@ -4,7 +4,7 @@ import Navbar from "../components/Navbar";
 import AIChat from "../components/AIChat";
 import AnnotationEditor from "../components/AnnotationEditor";
 import { api } from "../lib/api";
-import { ArrowLeft, Share2, Copy, Slack, Trello, Mail } from "lucide-react";
+import { ArrowLeft, Share2, Copy, Slack, Mail, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 export default function CaptureDetail() {
@@ -12,17 +12,15 @@ export default function CaptureDetail() {
   const nav = useNavigate();
   const [cap, setCap] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
+  const [integ, setInteg] = useState({ slack_connected: false, jira_connected: false });
+  const [posting, setPosting] = useState(false);
 
   const refresh = async () => {
-    try {
-      const { data } = await api.get(`/captures/${id}`);
-      setCap(data);
-    } catch (e) {
-      toast.error("Capture not found");
-      nav("/dashboard");
-    }
+    try { const { data } = await api.get(`/captures/${id}`); setCap(data); }
+    catch { toast.error("Capture not found"); nav("/dashboard"); }
   };
   useEffect(() => { refresh(); }, [id]);
+  useEffect(() => { api.get("/integrations").then(r => setInteg(r.data)).catch(() => {}); }, []);
 
   useEffect(() => {
     if (!cap || cap.kind !== "recording") return;
@@ -38,14 +36,36 @@ export default function CaptureDetail() {
 
   const shareUrl = `${window.location.origin}/share/${cap.share_token}`;
   const copyShare = () => { navigator.clipboard.writeText(shareUrl); toast.success("Share link copied"); };
-  const intent = (kind) => {
-    const links = {
-      slack: `https://slack.com/intl/en-in/help/articles/201330736?text=${encodeURIComponent("Sharing a SnapBurst capture: " + shareUrl)}`,
-      trello: `https://trello.com/add-card?desc=${encodeURIComponent(shareUrl)}&name=${encodeURIComponent(cap.title)}`,
-      jira: `https://www.atlassian.com/software/jira?text=${encodeURIComponent("SnapBurst: " + shareUrl)}`,
-      gmail: `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(cap.title)}&body=${encodeURIComponent(shareUrl)}`,
-    };
-    window.open(links[kind], "_blank");
+
+  const postSlack = async () => {
+    if (!integ.slack_connected) {
+      toast.error("Connect Slack in Settings first");
+      return;
+    }
+    setPosting(true);
+    try { await api.post(`/captures/${cap.id}/post-slack`, {}); toast.success("Posted to Slack 🎉"); }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setPosting(false); }
+  };
+
+  const postJira = async () => {
+    if (!integ.jira_connected) {
+      toast.error("Connect Jira in Settings first");
+      return;
+    }
+    setPosting(true);
+    try {
+      const { data } = await api.post(`/captures/${cap.id}/post-jira`, {});
+      toast.success(`Created ${data.key}`, { action: { label: "Open", onClick: () => window.open(data.url, "_blank") } });
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setPosting(false); }
+  };
+
+  const gmailIntent = () => {
+    window.open(`https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(cap.title)}&body=${encodeURIComponent(shareUrl)}`, "_blank");
+  };
+  const trelloIntent = () => {
+    window.open(`https://trello.com/add-card?desc=${encodeURIComponent(shareUrl)}&name=${encodeURIComponent(cap.title)}`, "_blank");
   };
 
   return (
@@ -81,11 +101,18 @@ export default function CaptureDetail() {
               <Copy size={14}/> Copy link
             </button>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => intent("slack")} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-slack"><Slack size={12}/>Slack</button>
-              <button onClick={() => intent("trello")} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-trello"><Trello size={12}/>Trello</button>
-              <button onClick={() => intent("jira")} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-jira">Jira</button>
-              <button onClick={() => intent("gmail")} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-gmail"><Mail size={12}/>Gmail</button>
+              <button onClick={postSlack} disabled={posting} className={`nb-sm p-2 text-xs font-bold flex items-center gap-1 justify-center ${integ.slack_connected ? "bg-[#A7F3D0]" : "bg-white opacity-80"}`} data-testid="share-slack">
+                <Slack size={12}/>Slack {integ.slack_connected ? "" : "*"}
+              </button>
+              <button onClick={postJira} disabled={posting} className={`nb-sm p-2 text-xs font-bold flex items-center gap-1 justify-center ${integ.jira_connected ? "bg-[#A7F3D0]" : "bg-white opacity-80"}`} data-testid="share-jira">
+                Jira {integ.jira_connected ? "" : "*"}
+              </button>
+              <button onClick={trelloIntent} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-trello">Trello <ExternalLink size={10}/></button>
+              <button onClick={gmailIntent} className="nb-sm bg-white p-2 text-xs font-bold flex items-center gap-1 justify-center" data-testid="share-gmail"><Mail size={12}/>Gmail</button>
             </div>
+            {(!integ.slack_connected || !integ.jira_connected) && (
+              <Link to="/settings" className="block text-xs underline mt-2" data-testid="connect-integrations">* Connect in Settings</Link>
+            )}
           </div>
           <div className="nb p-5 bg-white">
             <div className="label-mono mb-2">Details</div>

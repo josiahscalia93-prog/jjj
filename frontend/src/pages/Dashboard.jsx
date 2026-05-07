@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import UploadModal from "../components/UploadModal";
 import AIChat from "../components/AIChat";
@@ -25,6 +25,34 @@ export default function Dashboard() {
     finally { setLoading(false); }
   };
   useEffect(() => { refresh(); }, []);
+
+  // Handle Stripe checkout return
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const checkout = params.get("checkout");
+    const sessId = params.get("session_id");
+    if (checkout === "success" && sessId) {
+      let attempts = 0;
+      const poll = async () => {
+        attempts++;
+        try {
+          const { data } = await api.get(`/billing/checkout-status/${sessId}`);
+          if (data.payment_status === "paid") {
+            toast.success("🎉 Welcome to your new plan!");
+            setParams({}, { replace: true });
+            return;
+          }
+          if (data.status === "expired") { toast.error("Payment session expired"); setParams({}, { replace: true }); return; }
+          if (attempts < 5) setTimeout(poll, 2000); else setParams({}, { replace: true });
+        } catch { setParams({}, { replace: true }); }
+      };
+      poll();
+    } else if (checkout === "cancel") {
+      toast("Checkout cancelled", { description: "No charge made." });
+      setParams({}, { replace: true });
+    }
+    // eslint-disable-next-line
+  }, []);
 
   const filtered = items.filter(i => filter === "all" || i.kind === filter);
 

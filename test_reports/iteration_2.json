@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 2 backend testing — 46/47 tests passed (97.9%). All new endpoints validated: Stripe checkout (creation OK), webhook stripe (returns {ok:false} on missing sig, NOT 404), integrations Slack/Jira (PUT/GET/DELETE; secrets never echoed), capture post-slack/post-jira error paths (400 not connected, 404 cross-user), AI history with explicit session_id (preserved + ordered ascending + persists across calls), extension info & ZIP download (manifest.json at root, valid ZIP, manifest_version=3). Both Bearer & cookie auth verified. _id never leaks. ONE failure: GET /api/billing/checkout-status/{id} returns 500 due to a Pydantic validation error inside the emergentintegrations library — `metadata` field expects dict but Stripe SDK returns a StripeObject. Iteration 1 regression: still 24/24 green.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/billing/checkout-status/{session_id}",
+        "issue": "Returns 500 with 'Stripe error: Unexpected error retrieving session status: 1 validation error for CheckoutStatusResponse / metadata / Input should be a valid dictionary [type=dict_type, input_value=<StripeObject ...>]'. The emergentintegrations library defines `metadata: dict` on CheckoutStatusResponse with Pydantic v2 strict mode, but the underlying Stripe SDK returns a StripeObject (which is dict-like but not a `dict` subclass). The bug is inside the library, not user code — but it makes the user-facing post-checkout flow (Pro/Team upgrade confirmation) totally broken in the dashboard. Workaround: convert metadata via dict(stripe_obj) before validation, or call stripe SDK directly for status retrieval, or downgrade emergentintegrations.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/all_results.xml",
+    "/app/test_reports/pytest/iteration2_results.xml"
+  ],
+  "action_items": [
+    "Fix /api/billing/checkout-status — wrap or replace `await sc.get_checkout_status(session_id)` so the StripeObject metadata is coerced to a real dict before the emergentintegrations Pydantic model validates it (e.g., monkey-patch the response, or fall back to direct stripe.checkout.Session.retrieve() and build the response manually). Without this, paid users cannot have their plan promoted via the polling status endpoint (only the webhook path would work, and webhooks are not signed in this preview env).",
+    "(Optional) Drop the unused `import jwt as pyjwt` in server.py — JWT_SECRET is loaded but never used; either sign tokens or remove the import to avoid confusion.",
+    "(Optional) Add unique compound index on user_integrations.user_id (currently relies on update_one+upsert; fine but explicit index is cleaner).",
+    "(Optional) The hard-coded share host 'https://capture-annotate.preview.emergentagent.com' in post_to_slack / post_to_jira (lines 641, 658) should come from env (e.g., PUBLIC_APP_URL) — deploying to a new domain will silently break share links posted to Slack/Jira."
+  ],
+  "critical_code_review_comments": [
+    "BUG (library-side): emergentintegrations CheckoutStatusResponse.metadata is `dict` but Stripe returns StripeObject — breaks status polling. See action_items.",
+    "Hardcoded share base URL in /captures/{id}/post-slack and /captures/{id}/post-jira (lines 641 and 658) — should be env-driven.",
+    "post_to_jira makes a synchronous `requests.post()` call in an async endpoint — blocks the event loop on slow Atlassian responses. Same for post_to_slack. Use httpx.AsyncClient or run in threadpool for production.",
+    "PRICING dict has no input validation that amount > 0; tier mutation in code (vs DB-driven) is fine for MVP but means price changes require redeploy.",
+    "build_extension_zip() rebuilds the zip on EVERY /extension/info AND /extension/download call — twice on info because we call it for size_bytes after listing files. For a tiny extension it's cheap, but cache the result (in-memory + invalidate on file mtime) to save CPU.",
+    "/api/extension/download is unauthenticated — confirmed intentional per spec (public download). Good.",
+    "set_jira accepts arbitrary base_url that just needs http prefix — no validation that it's actually atlassian.net or even resolves. Low risk, but a stricter check would prevent typos.",
+    "billing_checkout uses request.base_url for webhook_url — behind k8s ingress this resolves correctly (uses X-Forwarded headers via uvicorn proxy_headers if enabled). Verified the resulting webhook URL ends in /api/webhook/stripe, which matches the @app.post route. Good.",
+    "/api/webhook/stripe is mounted on `app` (not api_router) at the literal path '/api/webhook/stripe' — works correctly, returns 200 + {ok:false} on missing signature as expected. Good.",
+    "ai_chat now stores chat_messages with same `now` timestamp for user+assistant rows — strict ordering relies on insert order in find().sort(created_at, 1). For two concurrent calls this could interleave. Use distinct timestamps or an ordinal field.",
+    "GET /integrations correctly omits jira_api_token AND slack_webhook_url from response — verified by tests. Good.",
+    "DELETE /integrations/jira uses $unset on multiple fields — correct, leaves user_integrations doc intact. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2.py (NEW — 23 tests for iteration 2 features)"
+  ],
+  "success_rate": {"backend": "97.9% (46/47)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "Tests register fresh TEST_it2_<uuid>@example.com per module run. alice@example.com/secret123 from /app/memory/test_credentials.md still valid for ad-hoc.",
+  "seed_data_creation": "Per run: 2 transient TEST_it2_*@example.com users, 1 capture (not auto-deleted), 1 user_integrations doc (cleared at end of TestIntegrations), 1 payment_transactions row (status=initiated, never paid). DB will accumulate test users + 1 unpaid txn per run; consider periodic cleanup.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Iteration 2 added 23 tests in /app/backend/tests/test_iteration2.py — reuse as regression. Known FAIL: TestBilling::test_checkout_status (emergentintegrations Pydantic dict_type validation bug on Stripe StripeObject metadata). Once main agent fixes this — likely by wrapping sc.get_checkout_status or manually building the response from stripe.checkout.Session.retrieve() — re-run pytest backend/tests/test_iteration2.py and expect 23/23. The webhook signature-missing test passes (returns {ok:false} 200, not 404), confirming the @app.post('/api/webhook/stripe') mounting works through the api_router include order. Stripe is in real test mode (sk_test_emergent) and create_checkout_session DOES return real cs_test_* URLs.",
+  "rca_of_the_issue": "RCA for /api/billing/checkout-status 500: When server.py:522 calls `status = await sc.get_checkout_status(session_id)`, the emergentintegrations library internally calls stripe.checkout.Session.retrieve() (Stripe Python SDK v2+), which returns a `stripe.checkout.Session` object whose `metadata` attribute is a `StripeObject` (a dict-like wrapper, NOT a Python dict). The library then validates the response against a Pydantic v2 model `CheckoutStatusResponse` with field `metadata: dict`. Pydantic v2 strict-typed `dict` rejects StripeObject because isinstance(StripeObject, dict) is False. Reproduction: any successful Stripe test-mode session created via /api/billing/checkout will fail status retrieval. Mitigation in user code (until library is fixed): catch the ValidationError, retrieve the session directly via `stripe.checkout.Session.retrieve(session_id)` using STRIPE_API_KEY, and manually map status/payment_status/amount_total/currency into the response. Alternatively, downgrade emergentintegrations to a version where metadata is typed `Dict[str, Any]` (non-strict) or `Optional[dict] = None` accepting Mapping."
+}

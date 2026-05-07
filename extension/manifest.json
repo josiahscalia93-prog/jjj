@@ -3,7 +3,7 @@
   "name": "SnapBurst — Screen Capture, Record & Share",
   "short_name": "SnapBurst",
   "version": "1.0.0",
-  "description": "Capture screenshots, record screen + webcam + mic, annotate, and share instantly with team via shareable links.",
+  "description": "Capture screenshots, record screen + webcam + mic, annotate, and share instantly with shareable links. Works with Slack, Trello, Jira & Gmail.",
   "permissions": [
     "activeTab",
     "tabs",
@@ -42,6 +42,13 @@
       "description": "Start screen recording"
     }
   },
+  "content_scripts": [
+    {
+      "matches": ["https://capture-annotate.preview.emergentagent.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "web_accessible_resources": [
     { "resources": ["recorder.html"], "matches": ["<all_urls>"] }
   ]

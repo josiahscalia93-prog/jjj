@@ -16,6 +16,20 @@ export default function AnnotationEditor({ capture, refresh }) {
   const [current, setCurrent] = useState(null);
   const [bgImg, setBgImg] = useState(null);
 
+  // Listen for AI "Apply to canvas" events
+  useEffect(() => {
+    const onApply = (e) => {
+      const text = e.detail?.text;
+      if (!text) return;
+      const cvs = canvasRef.current;
+      const x = cvs ? Math.max(40, cvs.width * 0.08) : 80;
+      const y = cvs ? Math.max(60, cvs.height * 0.12) : 120;
+      setShapes(s => [...s, { type: "text", color: "#FB923C", text, x, y, size: 32 }]);
+    };
+    window.addEventListener("snapburst:apply-annotation", onApply);
+    return () => window.removeEventListener("snapburst:apply-annotation", onApply);
+  }, []);
+
   // load image
   useEffect(() => {
     if (!capture || capture.kind !== "screenshot") return;

@@ -1,6 +1,6 @@
 """SnapBurst backend — auth, captures (object storage), AI assistant."""
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Header, Cookie, Response, Request, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response as FastAPIResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -16,8 +16,15 @@ import jwt as pyjwt
 import requests
 import io
 import base64
+import json
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from emergentintegrations.payments.stripe.checkout import (
+    StripeCheckout, CheckoutSessionRequest,
+)
+import zipfile
+import tempfile
+
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -28,6 +35,13 @@ DB_NAME = os.environ['DB_NAME']
 JWT_SECRET = os.environ['JWT_SECRET']
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 APP_NAME = os.environ.get('APP_NAME', 'snapburst')
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
+
+PRICING = {
+    "pro":  {"name": "Pro",  "amount": 8.0,  "currency": "usd"},
+    "team": {"name": "Team", "amount": 14.0, "currency": "usd"},
+}
+EXTENSION_DIR = Path("/app/extension")
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 
 # ---------- mongo ----------
@@ -462,7 +476,252 @@ async def ai_history(session_id: str, user: dict = Depends(current_user)):
     ).sort("created_at", 1).to_list(500)
     return rows
 
-# ---------- health ----------
+# ---------- Stripe billing ----------
+class CheckoutBody(BaseModel):
+    tier: str
+    origin_url: str
+
+@api_router.post("/billing/checkout")
+async def billing_checkout(body: CheckoutBody, request: Request, user: dict = Depends(current_user)):
+    if not STRIPE_API_KEY:
+        raise HTTPException(500, "Stripe not configured")
+    if body.tier not in PRICING:
+        raise HTTPException(400, "Unknown tier")
+    pkg = PRICING[body.tier]
+    host_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    success_url = f"{body.origin_url}/dashboard?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{body.origin_url}/?checkout=cancel"
+    req = CheckoutSessionRequest(
+        amount=pkg["amount"],
+        currency=pkg["currency"],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"user_id": user["user_id"], "tier": body.tier, "source": "snapburst_pricing"},
+    )
+    sess = await sc.create_checkout_session(req)
+    await db.payment_transactions.insert_one({
+        "session_id": sess.session_id,
+        "user_id": user["user_id"],
+        "tier": body.tier,
+        "amount": pkg["amount"],
+        "currency": pkg["currency"],
+        "payment_status": "initiated",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"url": sess.url, "session_id": sess.session_id}
+
+@api_router.get("/billing/checkout-status/{session_id}")
+async def billing_status(session_id: str, request: Request, user: dict = Depends(current_user)):
+    if not STRIPE_API_KEY:
+        raise HTTPException(500, "Stripe not configured")
+    host_url = str(request.base_url).rstrip("/")
+    sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
+    try:
+        status = await sc.get_checkout_status(session_id)
+    except Exception as e:
+        raise HTTPException(500, f"Stripe error: {e}")
+    txn = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if txn and txn.get("payment_status") != "paid" and status.payment_status == "paid":
+        # promote user, idempotent
+        tier = txn.get("tier") or status.metadata.get("tier")
+        await db.users.update_one(
+            {"user_id": txn["user_id"]},
+            {"$set": {"plan": tier, "plan_updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"payment_status": "paid", "status": status.status, "paid_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    return {
+        "status": status.status,
+        "payment_status": status.payment_status,
+        "amount_total": status.amount_total,
+        "currency": status.currency,
+    }
+
+@app.post("/api/webhook/stripe")
+async def stripe_webhook(request: Request):
+    if not STRIPE_API_KEY:
+        return {"ok": False}
+    host_url = str(request.base_url).rstrip("/")
+    sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature", "")
+    try:
+        ev = await sc.handle_webhook(body, sig)
+    except Exception as e:
+        logger.warning(f"webhook error: {e}")
+        return {"ok": False}
+    if ev and ev.session_id and ev.payment_status == "paid":
+        txn = await db.payment_transactions.find_one({"session_id": ev.session_id}, {"_id": 0})
+        if txn and txn.get("payment_status") != "paid":
+            tier = txn.get("tier") or (ev.metadata or {}).get("tier")
+            await db.users.update_one({"user_id": txn["user_id"]},
+                {"$set": {"plan": tier, "plan_updated_at": datetime.now(timezone.utc).isoformat()}})
+            await db.payment_transactions.update_one({"session_id": ev.session_id},
+                {"$set": {"payment_status": "paid", "paid_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True}
+
+# ---------- integrations: Slack & Jira ----------
+class SlackConfig(BaseModel):
+    webhook_url: str
+
+class JiraConfig(BaseModel):
+    base_url: str   # https://yoursite.atlassian.net
+    email: str
+    api_token: str
+    project_key: str
+
+@api_router.get("/integrations")
+async def get_integrations(user: dict = Depends(current_user)):
+    row = await db.user_integrations.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    # never echo back secrets
+    return {
+        "slack_connected": bool(row.get("slack_webhook_url")),
+        "jira_connected": bool(row.get("jira_api_token")),
+        "jira_base_url": row.get("jira_base_url"),
+        "jira_project_key": row.get("jira_project_key"),
+        "jira_email": row.get("jira_email"),
+    }
+
+@api_router.put("/integrations/slack")
+async def set_slack(cfg: SlackConfig, user: dict = Depends(current_user)):
+    if not cfg.webhook_url.startswith("https://hooks.slack.com/"):
+        raise HTTPException(400, "Must be a Slack incoming webhook URL")
+    await db.user_integrations.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"slack_webhook_url": cfg.webhook_url, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+@api_router.delete("/integrations/slack")
+async def remove_slack(user: dict = Depends(current_user)):
+    await db.user_integrations.update_one({"user_id": user["user_id"]}, {"$unset": {"slack_webhook_url": ""}})
+    return {"ok": True}
+
+@api_router.put("/integrations/jira")
+async def set_jira(cfg: JiraConfig, user: dict = Depends(current_user)):
+    base = cfg.base_url.rstrip("/")
+    if not base.startswith("http"):
+        raise HTTPException(400, "Invalid Jira base URL")
+    await db.user_integrations.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "jira_base_url": base, "jira_email": cfg.email,
+            "jira_api_token": cfg.api_token, "jira_project_key": cfg.project_key,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"ok": True}
+
+@api_router.delete("/integrations/jira")
+async def remove_jira(user: dict = Depends(current_user)):
+    await db.user_integrations.update_one(
+        {"user_id": user["user_id"]},
+        {"$unset": {"jira_base_url": "", "jira_email": "", "jira_api_token": "", "jira_project_key": ""}},
+    )
+    return {"ok": True}
+
+class PostNoteBody(BaseModel):
+    note: Optional[str] = None
+
+@api_router.post("/captures/{capture_id}/post-slack")
+async def post_to_slack(capture_id: str, body: PostNoteBody, user: dict = Depends(current_user)):
+    cap = await db.captures.find_one({"id": capture_id, "user_id": user["user_id"], "is_deleted": False}, {"_id": 0})
+    if not cap:
+        raise HTTPException(404, "Capture not found")
+    integ = await db.user_integrations.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    hook = integ.get("slack_webhook_url")
+    if not hook:
+        raise HTTPException(400, "Slack not connected")
+    share_url = f"https://capture-annotate.preview.emergentagent.com/share/{cap['share_token']}"
+    text = body.note or f"📷 *{cap['title']}* — shared via SnapBurst\n{share_url}"
+    try:
+        r = requests.post(hook, json={"text": text}, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(502, f"Slack post failed: {e}")
+    return {"ok": True}
+
+@api_router.post("/captures/{capture_id}/post-jira")
+async def post_to_jira(capture_id: str, body: PostNoteBody, user: dict = Depends(current_user)):
+    cap = await db.captures.find_one({"id": capture_id, "user_id": user["user_id"], "is_deleted": False}, {"_id": 0})
+    if not cap:
+        raise HTTPException(404, "Capture not found")
+    integ = await db.user_integrations.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    if not (integ.get("jira_api_token") and integ.get("jira_base_url") and integ.get("jira_project_key")):
+        raise HTTPException(400, "Jira not connected")
+    share_url = f"https://capture-annotate.preview.emergentagent.com/share/{cap['share_token']}"
+    summary = body.note or f"SnapBurst: {cap['title']}"
+    payload = {
+        "fields": {
+            "project": {"key": integ["jira_project_key"]},
+            "summary": summary[:240],
+            "description": {
+                "type": "doc", "version": 1,
+                "content": [{"type": "paragraph", "content": [
+                    {"type": "text", "text": "Captured with SnapBurst — "},
+                    {"type": "text", "text": "view capture", "marks": [{"type": "link", "attrs": {"href": share_url}}]},
+                ]}],
+            },
+            "issuetype": {"name": "Task"},
+        }
+    }
+    try:
+        r = requests.post(
+            f"{integ['jira_base_url']}/rest/api/3/issue",
+            auth=(integ["jira_email"], integ["jira_api_token"]),
+            json=payload,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=20,
+        )
+        if r.status_code >= 300:
+            raise HTTPException(502, f"Jira error {r.status_code}: {r.text[:300]}")
+        data = r.json()
+        return {"ok": True, "key": data.get("key"), "url": f"{integ['jira_base_url']}/browse/{data.get('key')}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Jira post failed: {e}")
+
+# ---------- extension ZIP download (no auth — public) ----------
+def build_extension_zip() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(EXTENSION_DIR):
+            for f in files:
+                if f in {".DS_Store"} or f.endswith((".md",)):
+                    continue
+                full = Path(root) / f
+                arc = full.relative_to(EXTENSION_DIR).as_posix()
+                zf.write(full, arc)
+    return buf.getvalue()
+
+@api_router.get("/extension/download")
+async def extension_download():
+    data = build_extension_zip()
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="snapburst-extension.zip"'},
+    )
+
+@api_router.get("/extension/info")
+async def extension_info():
+    manifest = json.loads((EXTENSION_DIR / "manifest.json").read_text())
+    data = build_extension_zip()
+    return {
+        "name": manifest["name"],
+        "version": manifest["version"],
+        "size_bytes": len(data),
+        "files": sorted([str(p.relative_to(EXTENSION_DIR)) for p in EXTENSION_DIR.rglob("*") if p.is_file()]),
+    }
+
+
 @api_router.get("/")
 async def root():
     return {"app": "SnapBurst", "ok": True}
