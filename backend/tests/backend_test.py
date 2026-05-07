@@ -146,7 +146,7 @@ class TestAuth:
         email = f"TEST_logout_{uuid.uuid4().hex[:8]}@example.com"
         s = requests.Session()
         r = s.post(f"{API}/auth/register",
-                   json={"email": email, "password": "pw12345!", "name": "Logout"}, timeout=15)
+                   json={"email": email, "password": _TEST_PASSWORD, "name": "Logout"}, timeout=15)
         assert r.status_code == 200
         token = r.json()["token"]
 

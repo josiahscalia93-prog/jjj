@@ -10,6 +10,7 @@
 - Unit-style _rate_check via direct module import w/ env override
 """
 import os
+from .conftest import TEST_PASSWORD
 import sys
 import uuid
 import asyncio
@@ -34,7 +35,7 @@ def H(token):
 def user():
     s = requests.Session()
     email = f"TEST_it5_{uuid.uuid4().hex[:8]}@example.com"
-    pw = "TestPass123!"
+    pw = TEST_PASSWORD
     r = s.post(f"{API}/auth/register",
                json={"email": email, "password": pw, "name": "It5 User"}, timeout=30)
     assert r.status_code == 200, r.text

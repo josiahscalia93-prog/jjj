@@ -6,6 +6,7 @@
   description <= 132 chars
 """
 import io
+from .conftest import TEST_PASSWORD
 import os
 import json
 import uuid
@@ -25,7 +26,7 @@ def H(token):
 def user():
     s = requests.Session()
     email = f"TEST_it4_{uuid.uuid4().hex[:8]}@example.com"
-    pw = "TestPass123!"
+    pw = TEST_PASSWORD
     r = s.post(f"{API}/auth/register",
                json={"email": email, "password": pw, "name": "It4 User"}, timeout=30)
     assert r.status_code == 200, r.text

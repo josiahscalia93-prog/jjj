@@ -8,6 +8,7 @@
 - _id never leaks; both Bearer & cookie auth still work
 """
 import io
+from .conftest import TEST_PASSWORD
 import os
 import uuid
 import zipfile
@@ -30,7 +31,7 @@ def user():
     """Fresh registered user for iteration 2 tests."""
     s = requests.Session()
     email = f"TEST_it2_{uuid.uuid4().hex[:8]}@example.com"
-    pw = "TestPass123!"
+    pw = TEST_PASSWORD
     r = s.post(f"{API}/auth/register",
                json={"email": email, "password": pw, "name": "It2 User"}, timeout=30)
     assert r.status_code == 200, r.text
@@ -47,7 +48,7 @@ def other_user():
     s = requests.Session()
     email = f"TEST_it2other_{uuid.uuid4().hex[:8]}@example.com"
     r = s.post(f"{API}/auth/register",
-               json={"email": email, "password": "TestPass123!", "name": "Other"}, timeout=30)
+               json={"email": email, "password": TEST_PASSWORD, "name": "Other"}, timeout=30)
     assert r.status_code == 200
     return {"token": r.json()["token"]}
 

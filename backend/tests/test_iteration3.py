@@ -7,6 +7,7 @@
 - Slack/Jira post error path uses PUBLIC_APP_URL
 """
 import io
+from .conftest import TEST_PASSWORD
 import os
 import re
 import uuid
@@ -29,7 +30,7 @@ def H(token):
 def user():
     s = requests.Session()
     email = f"TEST_it3_{uuid.uuid4().hex[:8]}@example.com"
-    pw = "TestPass123!"
+    pw = TEST_PASSWORD
     r = s.post(f"{API}/auth/register",
                json={"email": email, "password": pw, "name": "It3 User"}, timeout=30)
     assert r.status_code == 200, r.text
