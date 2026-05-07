@@ -810,14 +810,14 @@ import subprocess
 
 @api_router.post("/captures/{capture_id}/to-gif")
 async def transcode_to_gif(capture_id: str, user: dict = Depends(current_user)):
-    if not shutil.which("ffmpeg"):
-        raise HTTPException(500, "ffmpeg not available")
     cap = await db.captures.find_one(
         {"id": capture_id, "user_id": user["user_id"], "is_deleted": False},
         {"_id": 0},
     )
     if not cap or cap["kind"] != "recording":
         raise HTTPException(404, "Recording not found")
+    if not shutil.which("ffmpeg"):
+        raise HTTPException(500, "ffmpeg not available")
     src_bytes, _ = get_object(cap["storage_path"])
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as src_f:
         src_f.write(src_bytes)
