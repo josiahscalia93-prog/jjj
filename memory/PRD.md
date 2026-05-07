@@ -33,10 +33,22 @@ Build a Chrome extension (for submission to the Chrome Web Store) + companion we
 - ✅ Screen recording in-browser via getDisplayMedia + mic merge; webcam snapshot
 - ✅ Annotation editor (canvas): pen, arrow, rectangle, circle, text, blur (pixelate); save annotations to DB
 - ✅ Public share page with download
-- ✅ AI chat widget powered by GPT-5.2 with optional image upload
+- ✅ AI chat widget powered by GPT-5.2 with optional image upload + persistent history + "Apply to canvas" suggestion button
 - ✅ Object storage (Emergent) for all uploads
 - ✅ Chrome extension (Manifest V3) with popup, recorder page, full-page scrolling stitch screenshot
-- ✅ Backend tested 24/24 (100%)
+- ✅ Branded extension icons (16/48/128) and content script that auto-syncs auth token from web app
+- ✅ Backend tested 48/48 (100%) including AI vision, Stripe, Slack/Jira, integrations, extension download
+
+### Iteration 2 (this update)
+- ✅ Stripe checkout for Pro ($8) and Team ($14) plans (sk_test_emergent test mode)
+- ✅ Stripe success polling on /dashboard?checkout=success → user `plan` field promoted in MongoDB
+- ✅ Slack integration: store webhook URL in /settings, post share links via `/api/captures/{id}/post-slack`
+- ✅ Jira integration: store base_url + email + API token, create issues via `/api/captures/{id}/post-jira` (Atlassian REST v3)
+- ✅ AI chat history persists across reloads via session_id stored in localStorage (`/api/ai/history/{session_id}`)
+- ✅ "Apply to canvas" button on AI assistant messages — adds AI's suggestion as a text annotation
+- ✅ Public Privacy Policy page at `/privacy` (Chrome Web Store requirement)
+- ✅ Chrome Extension ZIP download endpoint at `/api/extension/download` — manifest.json at root, ready for Web Store submission
+- ✅ Settings page (`/settings`) with extension download + Slack/Jira config + privacy link
 
 ## Backlog
 **P1**
