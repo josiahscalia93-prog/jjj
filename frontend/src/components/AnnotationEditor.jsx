@@ -41,8 +41,11 @@ export default function AnnotationEditor({ capture, refresh }) {
         revoked = url;
         const img = new Image();
         img.onload = () => setBgImg(img);
+        img.onerror = (e) => console.warn("bg image decode failed:", e);
         img.src = url;
-      } catch {}
+      } catch (err) {
+        console.warn("annotation bg fetch failed:", err?.message || err);
+      }
     })();
     return () => revoked && URL.revokeObjectURL(revoked);
   }, [capture]);

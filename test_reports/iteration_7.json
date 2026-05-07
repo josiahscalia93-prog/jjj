@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 7 (code-quality refactor) backend regression: full pytest suite ran across 5 test files (backend_test.py, test_iteration2..5.py). 96/96 PASSED in 35s. Zero regressions from the _TEST_PASSWORD refactor in backend_test.py and from frontend-only edits (empty-catch -> console.warn, array-index keys -> stable IDs). Note: iter3 /to-gif tests are now GREEN again (ffmpeg appears reinstalled in this preview env vs iter6).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "tests/backend_test.py:149 (test_logout_revokes_session)", "issue": "Refactor claim was 'test files no longer contain literal hardcoded passwords' but this line still has literal password='pw12345!' instead of _TEST_PASSWORD. Functional impact: NONE (tests still pass). Security-scan impact: a basic pattern grep would still flag this string. Trivial fix: replace with _TEST_PASSWORD."},
+      {"endpoint": "tests/test_iteration2.py:50", "issue": "Literal password 'TestPass123!' remains. Out of stated refactor scope (request only listed backend_test.py), but if the policy is uniform across /app/backend/tests/*.py, this file should also adopt a uuid-derived helper or import _TEST_PASSWORD."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_iteration2.py",
+    "/app/backend/tests/test_iteration3.py",
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/test_iteration5.py",
+    "/app/test_reports/pytest/iteration7_results.xml"
+  ],
+  "action_items": [
+    "Optional polish to fully honor iter7 security claim: replace literal 'pw12345!' on backend_test.py:149 with _TEST_PASSWORD (one-line change; tests will still pass).",
+    "Optional consistency: extract _TEST_PASSWORD into a shared conftest fixture and reuse in test_iteration2.py to remove 'TestPass123!' literal.",
+    "No functional regressions to address — all 96 tests are GREEN."
+  ],
+  "critical_code_review_comments": [
+    "_TEST_PASSWORD = os.environ.get('SNAPBURST_TEST_PASSWORD') or ('Test_' + uuid.uuid4().hex[:12] + '!') is correctly built per-process; ephemeral and unique enough for transient TEST_*@example.com accounts. The `# noqa: S105` is appropriate.",
+    "Two stragglers exist (backend_test.py:149 'pw12345!', test_iteration2.py:50 'TestPass123!') — the security review note in the PR description claims they were removed, but grep still finds them. Either tighten the patch or weaken the claim.",
+    "Backend server.py wasn't touched in this iter — confirmed by lack of any new logic-level failures. Suite stability across iter1..iter5 endpoints is unchanged.",
+    "Pre-existing carry-overs unaffected by this iter (still worth fixing eventually): /api/captures/{id}/to-gif still does ffmpeg-presence check before capture/kind validation (404 vs 500 ordering); post_to_slack/post_to_jira still use sync `requests` inside async handlers; FastAPI on_event deprecation warnings.",
+    "Frontend changes (auth.jsx, AIChat.jsx, AnnotationEditor.jsx, Dashboard.jsx, Landing.jsx) were not in scope for this run (backend-only test request) — not validated here."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (96/96 PASSED, 0 skipped, 0 failed)", "frontend": "n/a (not in scope)"},
+  "test_credentials": "alice@example.com / secret123 from /app/memory/test_credentials.md (existing user). Test fixtures additionally register fresh TEST_*@example.com per run with _TEST_PASSWORD (uuid-derived).",
+  "seed_data_creation": "No new seed data. Existing per-test ephemeral users + iter5 analytics_rl/events docs (TEST-NET IPs 192.0.2.x / 198.51.100.x / 203.0.113.x / 10.20.30.x) are created and cleaned up within their own test fixtures — verified no leftover TEST_* docs blocking subsequent runs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Suite is healthy: 96 tests across /app/backend/tests/{backend_test.py,test_iteration2.py,test_iteration3.py,test_iteration4.py,test_iteration5.py}. Run: `cd /app/backend && pytest tests/ -v --junitxml=/app/test_reports/pytest/<name>.xml`. Iter7 was a refactor-only change; backend server logic was untouched. Two literal-password stragglers remain in tests (backend_test.py:149, test_iteration2.py:50) — flagged minor, not blocking. ffmpeg is currently installed in this env (iter3 /to-gif tests now pass). Frontend changes (empty-catch logging + stable-key replacement) were out of scope for this backend-only run.",
+  "rca of the issue": "Refactor-claim mismatch RCA: PR notes assert 'test files no longer contain literal hardcoded passwords (now generated via uuid + env override)'. Grep across /app/backend/tests/*.py for `password\\s*[:=]\\s*['\"][a-zA-Z0-9!@#$]{4,}` shows three matches: (a) line 122 'wrong-pass' — INTENTIONAL negative-test case, ignore; (b) line 149 'pw12345!' — MISSED replacement in backend_test.py::test_logout_revokes_session; (c) test_iteration2.py:50 'TestPass123!' — out of stated scope. Mitigation: substitute both with _TEST_PASSWORD (and optionally promote it to conftest.py for cross-file reuse). Zero functional impact; tests remain 96/96 GREEN."
+}

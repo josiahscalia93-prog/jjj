@@ -12,7 +12,7 @@ export default function AIChat() {
   const [input, setInput] = useState("");
   const [pendingImage, setPendingImage] = useState(null);
   const [messages, setMessages] = useState([
-    { role: "assistant", text: "Hey! I'm your SnapBurst assistant. Ask me anything about screen capture, annotations, sharing — or drop a screenshot for tips ✨" },
+    { id: "init_assistant", role: "assistant", text: "Hey! I'm your SnapBurst assistant. Ask me anything about screen capture, annotations, sharing — or drop a screenshot for tips ✨" },
   ]);
   const [sending, setSending] = useState(false);
   const sessionId = useRef(localStorage.getItem(SESSION_KEY) || `chat_${Math.random().toString(36).slice(2, 12)}`);
@@ -29,9 +29,16 @@ export default function AIChat() {
       try {
         const { data } = await api.get(`/ai/history/${sessionId.current}`);
         if (Array.isArray(data) && data.length) {
-          setMessages(data.map(d => ({ role: d.role, text: d.text, image: d.has_image })));
+          setMessages(data.map((d, i) => ({
+            id: `hist_${i}_${d.created_at || Date.now()}`,
+            role: d.role,
+            text: d.text,
+            image: d.has_image,
+          })));
         }
-      } catch {}
+      } catch (err) {
+        console.warn("chat history load failed:", err?.message || err);
+      }
       setHistoryLoaded(true);
     })();
   }, [open, historyLoaded, user]);
@@ -43,7 +50,8 @@ export default function AIChat() {
   const send = async () => {
     const text = input.trim();
     if (!text && !pendingImage) return;
-    setMessages(m => [...m, { role: "user", text: text || "(image)", image: pendingImage }]);
+    const userMsgId = `u_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+    setMessages(m => [...m, { id: userMsgId, role: "user", text: text || "(image)", image: pendingImage }]);
     setInput("");
     setSending(true);
     try {
@@ -53,9 +61,10 @@ export default function AIChat() {
         image_base64: pendingImage,
         image_mime: "image/png",
       });
-      setMessages(m => [...m, { role: "assistant", text: data.reply }]);
+      setMessages(m => [...m, { id: `a_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, role: "assistant", text: data.reply }]);
     } catch (e) {
-      setMessages(m => [...m, { role: "assistant", text: "Sorry, I had trouble responding. Try again?" }]);
+      console.warn("ai chat send failed:", e?.message || e);
+      setMessages(m => [...m, { id: `err_${Date.now()}`, role: "assistant", text: "Sorry, I had trouble responding. Try again?" }]);
     } finally {
       setSending(false);
       setPendingImage(null);
@@ -80,7 +89,7 @@ export default function AIChat() {
   const newSession = () => {
     sessionId.current = `chat_${Math.random().toString(36).slice(2, 12)}`;
     localStorage.setItem(SESSION_KEY, sessionId.current);
-    setMessages([{ role: "assistant", text: "Fresh start — what do you want to capture today?" }]);
+    setMessages([{ id: "init_new", role: "assistant", text: "Fresh start — what do you want to capture today?" }]);
     setHistoryLoaded(true);
   };
 
@@ -114,12 +123,12 @@ export default function AIChat() {
 
           <div ref={scroller} className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#FAFAFA]">
             {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div key={m.id || `msg-${i}`} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] nb-sm px-3 py-2 text-sm ${m.role === "user" ? "bg-[#A7F3D0]" : "bg-white"}`}>
                   {m.image && <div className="text-[11px] mb-1 font-mono-accent opacity-70">📷 image attached</div>}
                   <div className="whitespace-pre-wrap">{m.text}</div>
                   {m.role === "assistant" && i > 0 && (
-                    <button onClick={() => applySuggestion(m.text)} className="mt-2 nb-sm px-2 py-1 bg-[#FDE047] text-xs flex items-center gap-1" data-testid={`apply-suggestion-${i}`}>
+                    <button onClick={() => applySuggestion(m.text)} className="mt-2 nb-sm px-2 py-1 bg-[#FDE047] text-xs flex items-center gap-1" data-testid={`apply-suggestion-${m.id || i}`}>
                       <Wand2 size={11}/> Apply to canvas
                     </button>
                   )}

@@ -104,7 +104,7 @@ function Marquee() {
       <div className="overflow-hidden">
         <div className="marquee">
           {[...integrations, ...integrations].map((n, i) => (
-            <div key={i} className="text-4xl sm:text-6xl font-display font-bold flex items-center gap-8 whitespace-nowrap">
+            <div key={`${n}-${i < integrations.length ? "a" : "b"}`} className="text-4xl sm:text-6xl font-display font-bold flex items-center gap-8 whitespace-nowrap">
               <span className="text-[#FDE047]">★</span> {n}
             </div>
           ))}
@@ -243,18 +243,18 @@ function Pricing() {
 
 function Testimonials() {
   const list = [
-    { quote: "Replaced 3 tools we were paying for. The full-page screenshot alone is gold.", who: "Maya, Product Designer", img: CREATOR1 },
-    { quote: "We do async standups now — 90s SnapBurst recordings. Meetings dropped 40%.", who: "Diego, Engineering Lead", img: CREATOR2 },
-    { quote: "The AI annotations suggestions? Genuinely useful. Felt like magic.", who: "Sara, Customer Success", img: CREATOR1 },
+    { id: "maya", quote: "Replaced 3 tools we were paying for. The full-page screenshot alone is gold.", who: "Maya, Product Designer", img: CREATOR1 },
+    { id: "diego", quote: "We do async standups now — 90s SnapBurst recordings. Meetings dropped 40%.", who: "Diego, Engineering Lead", img: CREATOR2 },
+    { id: "sara", quote: "The AI annotations suggestions? Genuinely useful. Felt like magic.", who: "Sara, Customer Success", img: CREATOR1 },
   ];
   return (
     <section className="py-20 border-b-2 border-[#0F0F0F] bg-[#FBCFE8]" data-testid="testimonials-section">
       <div className="max-w-7xl mx-auto px-5 sm:px-8">
         <h2 className="font-display text-4xl sm:text-5xl font-bold text-center mb-12">Creators are obsessed</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {list.map((t, i) => (
-            <div key={i} className="nb p-6 bg-white">
-              <div className="flex gap-1 text-[#FB923C] mb-3">{[1,2,3,4,5].map(s => <Star key={s} size={16} fill="#FB923C" />)}</div>
+          {list.map((t) => (
+            <div key={t.id} className="nb p-6 bg-white">
+              <div className="flex gap-1 text-[#FB923C] mb-3">{[1,2,3,4,5].map(s => <Star key={`star-${t.id}-${s}`} size={16} fill="#FB923C" />)}</div>
               <p className="text-base">"{t.quote}"</p>
               <div className="mt-4 flex items-center gap-3">
                 <img src={t.img} alt="" className="w-10 h-10 rounded-full border-2 border-[#0F0F0F] object-cover" />
@@ -270,18 +270,18 @@ function Testimonials() {
 
 function FAQ() {
   const items = [
-    { q: "Is SnapBurst really free?", a: "Yes. Free plan includes unlimited screenshots and unlimited 1080p recording, no watermark, no time limit." },
-    { q: "Where is my data stored?", a: "Recordings and screenshots are encrypted at rest in our cloud storage. Public links are unguessable tokens." },
-    { q: "Does it work without an account?", a: "The Chrome extension can capture without an account; uploading & sharing requires a free account." },
-    { q: "Will it work on Mac and Windows?", a: "Yes — anywhere Chrome runs. Edge / Brave / Arc are also supported via Chromium." },
+    { id: "free", q: "Is SnapBurst really free?", a: "Yes. Free plan includes unlimited screenshots and unlimited 1080p recording, no watermark, no time limit." },
+    { id: "data", q: "Where is my data stored?", a: "Recordings and screenshots are encrypted at rest in our cloud storage. Public links are unguessable tokens." },
+    { id: "anon", q: "Does it work without an account?", a: "The Chrome extension can capture without an account; uploading & sharing requires a free account." },
+    { id: "platforms", q: "Will it work on Mac and Windows?", a: "Yes — anywhere Chrome runs. Edge / Brave / Arc are also supported via Chromium." },
   ];
   return (
     <section id="faq" className="py-20 border-b-2 border-[#0F0F0F]" data-testid="faq-section">
       <div className="max-w-3xl mx-auto px-5 sm:px-8">
         <h2 className="font-display text-4xl sm:text-5xl font-bold mb-10">FAQ</h2>
         <div className="space-y-3">
-          {items.map((it, i) => (
-            <details key={i} className="nb bg-white p-5 group" data-testid={`faq-${i}`}>
+          {items.map((it) => (
+            <details key={it.id} className="nb bg-white p-5 group" data-testid={`faq-${it.id}`}>
               <summary className="cursor-pointer font-bold text-lg flex justify-between">{it.q}<span className="group-open:rotate-45 transition-transform">+</span></summary>
               <p className="mt-3 text-zinc-700">{it.a}</p>
             </details>

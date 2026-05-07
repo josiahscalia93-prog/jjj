@@ -16,7 +16,11 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
-    } catch {
+    } catch (err) {
+      // 401 here is expected when not logged in — keep user=null silently.
+      if (err?.response?.status && err.response.status !== 401) {
+        console.warn("auth refresh failed:", err.response.status, err.message);
+      }
       setUser(null);
     } finally {
       setLoading(false);
@@ -38,7 +42,12 @@ export function AuthProvider({ children }) {
     return data.user;
   };
   const logout = async () => {
-    try { await api.post("/auth/logout"); } catch {}
+    try {
+      await api.post("/auth/logout");
+    } catch (err) {
+      // Logout is fail-soft (server side may have already cleared session).
+      console.warn("logout call failed (continuing client-side cleanup):", err?.message || err);
+    }
     setToken(null);
     setUser(null);
   };

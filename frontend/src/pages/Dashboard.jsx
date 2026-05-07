@@ -21,7 +21,9 @@ export default function Dashboard() {
     try {
       const { data } = await api.get("/captures");
       setItems(data);
-    } catch {}
+    } catch (err) {
+      console.warn("captures load failed:", err?.message || err);
+    }
     finally { setLoading(false); }
   };
   useEffect(() => { refresh(); }, []);
@@ -126,7 +128,9 @@ function CaptureCard({ c, idx, onDelete, onShare }) {
         const r = await api.get(`/captures/${c.id}/file`, { responseType: "blob" });
         const url = URL.createObjectURL(r.data);
         revoked = url; setThumb(url);
-      } catch {}
+      } catch (err) {
+        console.warn("thumbnail fetch failed:", err?.message || err);
+      }
     })();
     return () => revoked && URL.revokeObjectURL(revoked);
   }, [c.id, c.kind]);

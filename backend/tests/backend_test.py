@@ -13,6 +13,11 @@ from PIL import Image, ImageDraw
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://capture-annotate.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
+# Test-only throwaway password. Used solely to register ephemeral
+# TEST_user_<random>@example.com accounts in the integration DB.
+# Override via env if your security scanner objects to any literal here.
+_TEST_PASSWORD = os.environ.get("SNAPBURST_TEST_PASSWORD") or ("Test_" + uuid.uuid4().hex[:12] + "!")  # noqa: S105
+
 
 # ---------- helpers / fixtures ----------
 def _make_png_bytes(text: str = "SNAPBURST TEST") -> bytes:
@@ -56,7 +61,7 @@ def session():
 def primary_user(session):
     """Register a fresh user; fall back to login on alice if registration collides."""
     email = f"TEST_user_{uuid.uuid4().hex[:8]}@example.com"
-    password = "TestPass123!"
+    password = _TEST_PASSWORD
     name = "Test User"
     r = session.post(f"{API}/auth/register", json={"email": email, "password": password, "name": name}, timeout=30)
     assert r.status_code == 200, f"register failed: {r.status_code} {r.text}"
@@ -81,7 +86,7 @@ def secondary_user():
     """Second user for cross-user authorization checks."""
     s = requests.Session()
     email = f"TEST_user_{uuid.uuid4().hex[:8]}@example.com"
-    password = "TestPass123!"
+    password = _TEST_PASSWORD
     r = s.post(f"{API}/auth/register", json={"email": email, "password": password, "name": "Second User"}, timeout=30)
     assert r.status_code == 200
     return {"email": email, "password": password, "token": r.json()["token"], "session": s}
