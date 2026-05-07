@@ -1,74 +1,30 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useChatSession } from "../lib/useChatSession";
 import { Sparkles, Send, X, ImagePlus, Bot, Wand2 } from "lucide-react";
 import { toast } from "sonner";
-
-const SESSION_KEY = "sb_chat_session_id";
 
 export default function AIChat() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [pendingImage, setPendingImage] = useState(null);
-  const [messages, setMessages] = useState([
-    { id: "init_assistant", role: "assistant", text: "Hey! I'm your SnapBurst assistant. Ask me anything about screen capture, annotations, sharing — or drop a screenshot for tips ✨" },
-  ]);
-  const [sending, setSending] = useState(false);
-  const sessionId = useRef(localStorage.getItem(SESSION_KEY) || `chat_${Math.random().toString(36).slice(2, 12)}`);
   const scroller = useRef(null);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
 
-  // persist session id
-  useEffect(() => { localStorage.setItem(SESSION_KEY, sessionId.current); }, []);
+  const { messages, sending, loadHistory, send, reset } = useChatSession({ enabled: !!user });
 
-  // load history once on open
-  useEffect(() => {
-    if (!open || historyLoaded || !user) return;
-    (async () => {
-      try {
-        const { data } = await api.get(`/ai/history/${sessionId.current}`);
-        if (Array.isArray(data) && data.length) {
-          setMessages(data.map((d, i) => ({
-            id: `hist_${i}_${d.created_at || Date.now()}`,
-            role: d.role,
-            text: d.text,
-            image: d.has_image,
-          })));
-        }
-      } catch (err) {
-        console.warn("chat history load failed:", err?.message || err);
-      }
-      setHistoryLoaded(true);
-    })();
-  }, [open, historyLoaded, user]);
-
+  useEffect(() => { if (open) loadHistory(); }, [open, loadHistory]);
   useEffect(() => { scroller.current?.scrollTo({ top: 9e9 }); }, [messages, open]);
 
   if (!user) return null;
 
-  const send = async () => {
+  const onSend = async () => {
     const text = input.trim();
     if (!text && !pendingImage) return;
-    const userMsgId = `u_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
-    setMessages(m => [...m, { id: userMsgId, role: "user", text: text || "(image)", image: pendingImage }]);
     setInput("");
-    setSending(true);
-    try {
-      const { data } = await api.post("/ai/chat", {
-        message: text || "Please analyze this screenshot and suggest annotations.",
-        session_id: sessionId.current,
-        image_base64: pendingImage,
-        image_mime: "image/png",
-      });
-      setMessages(m => [...m, { id: `a_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, role: "assistant", text: data.reply }]);
-    } catch (e) {
-      console.warn("ai chat send failed:", e?.message || e);
-      setMessages(m => [...m, { id: `err_${Date.now()}`, role: "assistant", text: "Sorry, I had trouble responding. Try again?" }]);
-    } finally {
-      setSending(false);
-      setPendingImage(null);
-    }
+    const img = pendingImage;
+    setPendingImage(null);
+    await send({ text, imageBase64: img });
   };
 
   const onPickImage = (e) => {
@@ -80,17 +36,9 @@ export default function AIChat() {
   };
 
   const applySuggestion = (text) => {
-    // distill the assistant text into a short call-out (first sentence, max 80 chars)
     const short = (text.split(/[.!?]\s/)[0] || text).trim().slice(0, 80);
     const fired = window.dispatchEvent(new CustomEvent("snapburst:apply-annotation", { detail: { text: short } }));
     if (fired) toast.success("AI suggestion applied to canvas");
-  };
-
-  const newSession = () => {
-    sessionId.current = `chat_${Math.random().toString(36).slice(2, 12)}`;
-    localStorage.setItem(SESSION_KEY, sessionId.current);
-    setMessages([{ id: "init_new", role: "assistant", text: "Fresh start — what do you want to capture today?" }]);
-    setHistoryLoaded(true);
   };
 
   return (
@@ -116,24 +64,14 @@ export default function AIChat() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={newSession} className="text-xs underline" data-testid="ai-new-chat">New chat</button>
+              <button onClick={reset} className="text-xs underline" data-testid="ai-new-chat">New chat</button>
               <button onClick={() => setOpen(false)} aria-label="Close" data-testid="ai-close-btn"><X size={18} /></button>
             </div>
           </div>
 
           <div ref={scroller} className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#FAFAFA]">
             {messages.map((m, i) => (
-              <div key={m.id || `msg-${i}`} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] nb-sm px-3 py-2 text-sm ${m.role === "user" ? "bg-[#A7F3D0]" : "bg-white"}`}>
-                  {m.image && <div className="text-[11px] mb-1 font-mono-accent opacity-70">📷 image attached</div>}
-                  <div className="whitespace-pre-wrap">{m.text}</div>
-                  {m.role === "assistant" && i > 0 && (
-                    <button onClick={() => applySuggestion(m.text)} className="mt-2 nb-sm px-2 py-1 bg-[#FDE047] text-xs flex items-center gap-1" data-testid={`apply-suggestion-${m.id || i}`}>
-                      <Wand2 size={11}/> Apply to canvas
-                    </button>
-                  )}
-                </div>
-              </div>
+              <ChatBubble key={m.id || `msg-${i}`} m={m} idx={i} onApply={applySuggestion} />
             ))}
             {sending && <div className="text-xs text-zinc-500 font-mono-accent">thinking…</div>}
           </div>
@@ -153,17 +91,37 @@ export default function AIChat() {
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
+              onKeyDown={e => e.key === "Enter" && !e.shiftKey && onSend()}
               placeholder="Ask anything about SnapBurst…"
               className="flex-1 nb-input !py-2 !text-sm"
               data-testid="ai-input"
             />
-            <button onClick={send} disabled={sending} className="nb-btn nb-btn-tangerine !px-3 !py-2" data-testid="ai-send-btn">
+            <button onClick={onSend} disabled={sending} className="nb-btn nb-btn-tangerine !px-3 !py-2" data-testid="ai-send-btn">
               <Send size={16} />
             </button>
           </div>
         </div>
       )}
     </>
+  );
+}
+
+function ChatBubble({ m, idx, onApply }) {
+  return (
+    <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+      <div className={`max-w-[85%] nb-sm px-3 py-2 text-sm ${m.role === "user" ? "bg-[#A7F3D0]" : "bg-white"}`}>
+        {m.image && <div className="text-[11px] mb-1 font-mono-accent opacity-70">📷 image attached</div>}
+        <div className="whitespace-pre-wrap">{m.text}</div>
+        {m.role === "assistant" && idx > 0 && (
+          <button
+            onClick={() => onApply(m.text)}
+            className="mt-2 nb-sm px-2 py-1 bg-[#FDE047] text-xs flex items-center gap-1"
+            data-testid={`apply-suggestion-${m.id || idx}`}
+          >
+            <Wand2 size={11} /> Apply to canvas
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

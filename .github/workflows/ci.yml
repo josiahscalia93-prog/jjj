@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:6
+        ports: [27017:27017]
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: "pip" }
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install ruff pytest
+      - name: Lint (ruff)
+        run: ruff check backend/
+      - name: Run tests
+        env:
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: ci_test_db
+          JWT_SECRET: ci-only-not-real
+          PUBLIC_APP_URL: http://localhost:3000
+          STRIPE_API_KEY: sk_test_emergent
+        run: |
+          cd backend
+          pytest tests/ -v --tb=short --junitxml=/tmp/pytest.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pytest-results
+          path: /tmp/pytest.xml
+
+  frontend:
+    name: Frontend (React)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "yarn", cache-dependency-path: "frontend/yarn.lock" }
+      - name: Install dependencies
+        run: cd frontend && yarn install --frozen-lockfile
+      - name: Lint
+        run: cd frontend && yarn eslint src --max-warnings 0
+      - name: Build
+        env:
+          REACT_APP_BACKEND_URL: https://capture-annotate.preview.emergentagent.com
+        run: cd frontend && yarn build
+
+  extension:
+    name: Chrome Extension validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Validate manifest + JS syntax
+        run: |
+          cd extension
+          # Manifest must be JSON
+          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"
+          # Description ≤ 132 chars (Chrome Web Store limit)
+          node -e "
+            const m = JSON.parse(require('fs').readFileSync('manifest.json','utf8'));
+            if (m.description.length > 132) { console.error('description too long:', m.description.length); process.exit(1); }
+            if (m.manifest_version !== 3) { console.error('manifest_version must be 3'); process.exit(1); }
+            console.log('manifest ok: v' + m.version + ', desc=' + m.description.length + ' chars');
+          "
+          # JS files parse
+          for f in popup.js background.js recorder.js content.js; do
+            node --check "$f" || (echo "syntax error in $f" && exit 1)
+          done
+      - name: Build & inspect extension ZIP
+        run: |
+          cd extension
+          zip -r ../snapburst-extension.zip . -x '*.md' '.DS_Store' 'store-assets/*'
+          unzip -l ../snapburst-extension.zip | head -20
+          # Manifest MUST be at zip root (Web Store hard requirement)
+          unzip -l ../snapburst-extension.zip | grep -E "^\s*[0-9]+\s+[^/]+\s+manifest\.json$" || (echo "manifest.json must be at ZIP root" && exit 1)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapburst-extension
+          path: snapburst-extension.zip

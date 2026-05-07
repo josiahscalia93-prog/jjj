@@ -1,6 +1,7 @@
 """SnapBurst backend — auth, captures (object storage), AI assistant."""
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Header, Cookie, Response, Request, Query
 from fastapi.responses import StreamingResponse, Response as FastAPIResponse
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -199,34 +200,31 @@ async def current_user(
     return user
 
 # ---------- app ----------
-app = FastAPI(title="SnapBurst API")
-api_router = APIRouter(prefix="/api")
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app_: FastAPI):
     init_storage()
     await db.users.create_index("email", unique=True)
     await db.user_sessions.create_index("session_token", unique=True)
     await db.captures.create_index("share_token", unique=True)
-    # analytics indexes (idempotent) + TTL
     await db.analytics_events.create_index([("event", 1), ("hero_variant", 1)])
     try:
         await db.analytics_events.create_index(
             "created_at_dt", expireAfterSeconds=ANALYTICS_TTL_DAYS * 24 * 3600,
         )
     except Exception as e:
-        logger.warning(f"TTL index create failed (already exists with different opts?): {e}")
-    # Rate-limit sliding-window collection: 70-second TTL (>60s window with margin)
+        logger.warning(f"TTL index create failed: {e}")
     await db.analytics_rl.create_index("ip")
     try:
         await db.analytics_rl.create_index("ts", expireAfterSeconds=70)
     except Exception as e:
         logger.warning(f"rl TTL index: {e}")
     logger.info("SnapBurst API ready")
-
-@app.on_event("shutdown")
-async def shutdown():
+    yield
     client.close()
+
+
+app = FastAPI(title="SnapBurst API", lifespan=lifespan)
+api_router = APIRouter(prefix="/api")
 
 # ---------- auth ----------
 @api_router.post("/auth/register")
