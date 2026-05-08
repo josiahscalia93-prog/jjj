@@ -140,22 +140,25 @@ class TestRateLimitDBSeed:
 # ---------- Unit-style _rate_check via direct import (env override) ----------
 class TestRateCheckUnit:
     def test_rate_check_allows_then_blocks_with_low_limit(self, monkeypatch):
-        """Reload server module with ANALYTICS_RATE_LIMIT_PER_MIN=5; first 5 -> True, next -> False."""
+        """Reload analytics module with ANALYTICS_RATE_LIMIT_PER_MIN=5; first 5 -> True, next -> False."""
         monkeypatch.setenv("ANALYTICS_RATE_LIMIT_PER_MIN", "5")
         if "/app/backend" not in sys.path:
             sys.path.insert(0, "/app/backend")
-        if "server" in sys.modules:
-            del sys.modules["server"]
-        srv = importlib.import_module("server")
+        # Force reload of config + analytics so env override takes effect
+        for m in ("core.config", "routers.analytics"):
+            if m in sys.modules:
+                del sys.modules[m]
+        cfg = importlib.import_module("core.config")
+        ana = importlib.import_module("routers.analytics")
+        from core.db import db as live_db
         try:
-            assert srv.ANALYTICS_RATE_LIMIT == 5, f"env override failed: {srv.ANALYTICS_RATE_LIMIT}"
-            # Run async _rate_check via dedicated event loop owned by this test
+            assert cfg.ANALYTICS_RATE_LIMIT == 5, f"env override failed: {cfg.ANALYTICS_RATE_LIMIT}"
             async def run_check():
-                await srv.db.analytics_rl.delete_many({"ip": "10.20.30"})
+                await live_db.analytics_rl.delete_many({"ip": "10.20.30"})
                 results = []
                 for _ in range(7):
-                    results.append(await srv._rate_check("10.20.30.55"))
-                await srv.db.analytics_rl.delete_many({"ip": "10.20.30"})
+                    results.append(await ana._rate_check("10.20.30.55"))
+                await live_db.analytics_rl.delete_many({"ip": "10.20.30"})
                 return results
             loop = asyncio.new_event_loop()
             try:
@@ -165,8 +168,8 @@ class TestRateCheckUnit:
             assert results[:5] == [True] * 5, f"first 5 should pass: {results}"
             assert results[5:] == [False, False], f"after 5 should block: {results}"
         finally:
-            # Drop reloaded module to avoid affecting other tests
-            sys.modules.pop("server", None)
+            for m in ("core.config", "routers.analytics"):
+                sys.modules.pop(m, None)
 
 
 # ---------- Extension Store ID endpoints ----------
